@@ -279,13 +279,31 @@ export class AdbController {
     onProgress?.({ phase: 3, message: '正在批次提取 ART Dexopt 編譯狀態 (dumpsys package dexopt)...' });
     this.log('掃描', '步驟 3/3: 批次提取 Dexopt 狀態 (dumpsys package dexopt)');
     
+    const dexoptMap = await this.getBatchDexoptStatusMap();
+
+    onProgress?.({ phase: 4, message: '正在分群歸類應用程式 (常用 / 一般 / 不支援 AOT)...' });
+    const classified = classifyApps(Array.from(pkgMap.values()), usageData, launcherSet, dexoptMap);
+    
+    this.log('掃描完成', `常用: ${classified.frequentlyUsed.length}, 一般: ${classified.general.length}, 不支援: ${classified.cannotAot.length}`);
+    return classified;
+  }
+
+  /**
+   * Batch retrieve and parse Dexopt status map for all packages on device
+   * @returns {Promise<Map<string, { status: string, reason: string, hasCode: boolean, isOverlay: boolean }>>}
+   */
+  async getBatchDexoptStatusMap() {
+    if (this.isDemoMode) {
+      return new Map();
+    }
+
     let dexoptRaw = '';
     // Priority 1: dumpsys package dexopt (fast targeted dump on Android 7-17)
     try {
       const res = await this.exec(['dumpsys', 'package', 'dexopt']);
       if (res.stdout && res.stdout.length > 50) {
         dexoptRaw = res.stdout;
-        this.log('掃描', `已透過 dumpsys package dexopt 取得資料 (${dexoptRaw.length} 字元)`);
+        this.log('狀態更新', `已透過 dumpsys package dexopt 取得最新資料 (${dexoptRaw.length} 字元)`);
       }
     } catch (e) {
       this.log('警告', `dumpsys package dexopt 失敗: ${e.message}`);
@@ -297,7 +315,7 @@ export class AdbController {
         const res = await this.exec(['pm', 'art', 'dump']);
         if (res.stdout && res.stdout.length > 50) {
           dexoptRaw = res.stdout;
-          this.log('掃描', `已透過 pm art dump 取得資料 (${dexoptRaw.length} 字元)`);
+          this.log('狀態更新', `已透過 pm art dump 取得最新資料 (${dexoptRaw.length} 字元)`);
         }
       } catch (e) {
         // fallback
@@ -306,19 +324,14 @@ export class AdbController {
 
     // Priority 3: dumpsys package (full dump fallback)
     if (!dexoptRaw) {
-      this.log('掃描', '備援執行完整 dumpsys package...');
+      this.log('狀態更新', '備援執行完整 dumpsys package 取得最新資料...');
       const res = await this.exec(['dumpsys', 'package']);
       dexoptRaw = res.stdout;
     }
 
     const dexoptMap = parseDumpsysPackageStream(dexoptRaw);
-    this.log('掃描', `成功解析 ${dexoptMap.size} 個套件之 Dexopt 紀錄`);
-
-    onProgress?.({ phase: 4, message: '正在分群歸類應用程式 (常用 / 一般 / 不支援 AOT)...' });
-    const classified = classifyApps(Array.from(pkgMap.values()), usageData, launcherSet, dexoptMap);
-    
-    this.log('掃描完成', `常用: ${classified.frequentlyUsed.length}, 一般: ${classified.general.length}, 不支援: ${classified.cannotAot.length}`);
-    return classified;
+    this.log('狀態更新', `成功解析 ${dexoptMap.size} 個套件之 Dexopt 紀錄`);
+    return dexoptMap;
   }
 
   /**
@@ -370,9 +383,11 @@ export class AdbController {
    * Optimize a single app with specified mode
    * @param {string} packageName
    * @param {'speed'|'speed-profile'} mode
+   * @param {object} options
+   * @param {boolean} [options.skipQueryStatus=false] - When true, skips dumpsys package re-query (for batch processing)
    */
-  async compileApp(packageName, mode = 'speed', { onOutput } = {}) {
-    this.log('單一最佳化', `正在編譯 [${packageName}]，模式: ${mode}...`);
+  async compileApp(packageName, mode = 'speed', { onOutput, skipQueryStatus = false } = {}) {
+    this.log('最佳化', `正在編譯 [${packageName}]，模式: ${mode}...`);
     
     if (this.isDemoMode) {
       return this._mockCompileApp(packageName, mode, { onOutput });
@@ -381,6 +396,15 @@ export class AdbController {
     // cmd package compile -m <mode> -f <package>
     const compileCmd = ['cmd', 'package', 'compile', '-m', mode, '-f', packageName];
     const compileRes = await this.exec(compileCmd, { onOutput });
+
+    if (skipQueryStatus) {
+      this.log('完成', `[${packageName}] 編譯指令已送出 (批次模式略過單一 dumpsys 查詢)`);
+      return {
+        status: mode,
+        reason: 'cmdline',
+        hasCode: true,
+      };
+    }
 
     // Partial re-query with dumpsys package <packageName>
     this.log('狀態更新', `重新擷取 [${packageName}] 之最新狀態...`);

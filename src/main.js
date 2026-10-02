@@ -723,6 +723,7 @@ async function handleStartBatch() {
     try {
       const updated = await adbController.compileApp(app.packageName, targetMode, {
         onOutput: (chunk) => appendTerminalLog(chunk),
+        skipQueryStatus: true,
       });
       app.status = updated.status;
       app.reason = updated.reason;
@@ -736,11 +737,17 @@ async function handleStartBatch() {
     }
   }
 
-  appendTerminalLog(`\n========== 批次 AOT 編譯結束 (成功: ${successCount}, 失敗: ${failedCount}) ==========\n`);
+  const wasCancelled = !state.isBatchRunning;
+  appendTerminalLog(`\n========== 批次 AOT 編譯${wasCancelled ? '已中斷' : '結束'} (成功: ${successCount}, 失敗: ${failedCount}) ==========\n`);
 
-  if (state.isBatchRunning) {
-    showToast('批次編譯完成', `已成功最佳化 ${successCount} 個應用程式。`, 'info');
+  if (!wasCancelled) {
+    showToast('批次編譯完成', `已成功最佳化 ${successCount} 個應用程式，正在同步最新狀態...`, 'info');
+  } else {
+    showToast('批次編譯已中斷', `已執行 ${successCount + failedCount} 個應用程式，正在同步最新狀態...`, 'warning');
   }
+
+  // Refresh status of all apps once at the end or upon cancellation
+  await refreshAppStatuses(targetMode);
 
   state.isBatchRunning = false;
   el.btnBatchSpeed?.removeAttribute('disabled');
@@ -753,6 +760,45 @@ async function handleStartBatch() {
       el.batchProgressBarContainer?.classList.add('hidden');
     }
   }, 4000);
+}
+
+/**
+ * Batch re-query Dexopt status for all apps from device and update UI in-place
+ */
+async function refreshAppStatuses(targetMode) {
+  appendTerminalLog('\n[狀態更新] 正在從裝置批次擷取最新 Dexopt 編譯狀態...\n');
+  if (el.batchProgressCurrentApp) {
+    el.batchProgressCurrentApp.textContent = '正在批次重新取得所有應用程式之最新 Dexopt 狀態...';
+  }
+
+  try {
+    const dexoptMap = await adbController.getBatchDexoptStatusMap();
+    const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
+
+    for (const app of allApps) {
+      const info = dexoptMap.get(app.packageName);
+      if (info) {
+        app.status = info.status;
+        app.reason = info.reason;
+        if (info.hasCode === false) {
+          app.hasCode = false;
+        }
+
+        // If batch was speed-profile but app fell back to verify, switch button to speed
+        if (targetMode === 'speed-profile' && app.status === 'verify') {
+          app.overrideMode = 'speed';
+        } else if (targetMode === 'speed' && app.status === 'speed') {
+          delete app.overrideMode;
+        }
+      }
+    }
+
+    renderAppGrids();
+    updatePillCounts();
+    appendTerminalLog('[狀態更新] 最新 Dexopt 狀態已全數同步完成。\n');
+  } catch (err) {
+    appendTerminalLog(`[狀態更新] 批次擷取狀態失敗: ${err.message}\n`);
+  }
 }
 
 function handleCancelBatch() {
