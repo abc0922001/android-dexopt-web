@@ -126,3 +126,41 @@ test('formatDisplayName produces readable names', () => {
   assert.equal(formatDisplayName('jp.naver.line.android'), 'LINE');
   assert.equal(formatDisplayName('com.foo.bar_baz'), 'Bar Baz');
 });
+
+test('parseDumpsysPackageStream handles pure dumpsys package dexopt output', () => {
+  const sample = `
+Dexopt state:
+  [com.android.chrome]
+    path: /data/app/~~xyz/base.apk
+      arm64: [status=speed-profile] [reason=bg-dexopt]
+  [jp.naver.line.android]
+    path: /data/app/~~abc/base.apk
+      arm64: [status=speed] [reason=cmdline]
+  [com.google.android.overlay]
+    (none)
+`;
+  const map = parseDumpsysPackageStream(sample);
+  assert.equal(map.get('com.android.chrome').status, 'speed-profile');
+  assert.equal(map.get('com.android.chrome').reason, 'bg-dexopt');
+  assert.equal(map.get('jp.naver.line.android').status, 'speed');
+  assert.equal(map.get('com.google.android.overlay').hasCode, false);
+});
+
+test('parseDumpsysPackageStream handles Android 14+ ART Service compilation filter format', () => {
+  const sample = `
+[com.android.chrome]
+  path: /data/app/base.apk
+    compilation filter: speed-profile
+    compilation reason: bg-dexopt
+[com.google.android.calculator]
+  path: /system/app/calc.apk
+    compilation_filter=verify
+    compilation_reason=vdex
+`;
+  const map = parseDumpsysPackageStream(sample);
+  assert.equal(map.get('com.android.chrome').status, 'speed-profile');
+  assert.equal(map.get('com.android.chrome').reason, 'bg-dexopt');
+  assert.equal(map.get('com.google.android.calculator').status, 'verify');
+  assert.equal(map.get('com.google.android.calculator').reason, 'vdex');
+});
+

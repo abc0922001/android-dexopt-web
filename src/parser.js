@@ -115,36 +115,51 @@ export function parseDumpsysPackageStream(text) {
   const dexoptMap = new Map();
   if (!text) return dexoptMap;
 
-  // Split or scan by "Package ["
   const lines = text.split(/\r?\n/);
-  let currentPkg = null;
   let currentInfo = null;
 
-  const pkgStartRegex = /Package\s+\[(?<pkg>[a-zA-Z0-9_\.]+)\]/;
-  const dexoptRegex = /\[status=(?<status>[a-zA-Z0-9_-]+)\]\s+\[reason=(?<reason>[a-zA-Z0-9_-]+)\]/;
+  // Matches either:
+  // "Package [com.foo] (...)" (from Package Details in dumpsys package)
+  // "  [com.foo]" (from dumpsys package dexopt or Dexopt state: section)
+  // "Package: com.foo"
+  const pkgStartRegex = /^(?:\s*Package\s*\[|\s*\[|\s*Package:\s*)(?<pkg>[a-zA-Z0-9_\.]+)[\]\:]/i;
+
+  // Pattern 1: [status=speed-profile] [reason=bg-dexopt] or [status=speed]
+  const patternBrackets = /\[status=(?<status>[a-zA-Z0-9_-]+)\](?:\s+\[reason=(?<reason>[a-zA-Z0-9_-]+)\])?/i;
+  // Pattern 2: compilation filter: speed-profile or compilation_filter=speed-profile
+  const patternFilter = /(?:compilation[-_\s]*filter|status)[=:\s]+(?<status>[a-zA-Z0-9_-]+)/i;
+  // Pattern 3: compilation reason: bg-dexopt or reason=bg-dexopt
+  const patternReason = /(?:compilation[-_\s]*reason|reason)[=:\s]+(?<reason>[a-zA-Z0-9_-]+)/i;
+
+  const getOrCreateInfo = (pkg) => {
+    if (!dexoptMap.has(pkg)) {
+      dexoptMap.set(pkg, {
+        packageName: pkg,
+        status: 'unknown',
+        reason: 'unknown',
+        hasCode: true,
+        isOverlay: false,
+      });
+    }
+    return dexoptMap.get(pkg);
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
     const pkgMatch = line.match(pkgStartRegex);
-    if (pkgMatch && pkgMatch.groups) {
-      if (currentPkg && currentInfo) {
-        dexoptMap.set(currentPkg, currentInfo);
+    if (pkgMatch && pkgMatch.groups && pkgMatch.groups.pkg) {
+      const candidatePkg = pkgMatch.groups.pkg;
+      // Filter out non-package identifiers (e.g. instruction sets or paths)
+      if (candidatePkg.includes('.') && !candidatePkg.startsWith('http')) {
+        currentInfo = getOrCreateInfo(candidatePkg);
+        continue;
       }
-      currentPkg = pkgMatch.groups.pkg;
-      currentInfo = {
-        packageName: currentPkg,
-        status: 'unknown',
-        reason: 'unknown',
-        hasCode: true,
-        isOverlay: false,
-      };
-      continue;
     }
 
     if (!currentInfo) continue;
 
-    if (line.includes('hasCode=false') || line.includes('apk does not have code')) {
+    if (line.includes('hasCode=false') || line.includes('apk does not have code') || line.includes('(none)')) {
       currentInfo.hasCode = false;
     }
 
@@ -152,15 +167,28 @@ export function parseDumpsysPackageStream(text) {
       currentInfo.isOverlay = true;
     }
 
-    const matchDex = line.match(dexoptRegex);
-    if (matchDex && matchDex.groups) {
-      currentInfo.status = matchDex.groups.status;
-      currentInfo.reason = matchDex.groups.reason;
+    // Try brackets first: [status=speed-profile] [reason=bg-dexopt]
+    const bracketMatch = line.match(patternBrackets);
+    if (bracketMatch && bracketMatch.groups) {
+      if (bracketMatch.groups.status) currentInfo.status = bracketMatch.groups.status;
+      if (bracketMatch.groups.reason) currentInfo.reason = bracketMatch.groups.reason;
+      continue;
     }
-  }
 
-  if (currentPkg && currentInfo) {
-    dexoptMap.set(currentPkg, currentInfo);
+    // Try filter/status
+    const filterMatch = line.match(patternFilter);
+    if (filterMatch && filterMatch.groups && filterMatch.groups.status) {
+      const s = filterMatch.groups.status;
+      if (s !== 'kOatUpToDate') {
+        currentInfo.status = s;
+      }
+    }
+
+    // Try reason
+    const reasonMatch = line.match(patternReason);
+    if (reasonMatch && reasonMatch.groups && reasonMatch.groups.reason) {
+      currentInfo.reason = reasonMatch.groups.reason;
+    }
   }
 
   return dexoptMap;
@@ -180,14 +208,25 @@ export function parseSinglePackageDexopt(text) {
 
   if (!text) return result;
 
-  if (text.includes('hasCode=false') || text.includes('apk does not have code')) {
+  if (text.includes('hasCode=false') || text.includes('apk does not have code') || text.includes('(none)')) {
     result.hasCode = false;
   }
 
-  const matchDex = text.match(/\[status=(?<status>[a-zA-Z0-9_-]+)\]\s+\[reason=(?<reason>[a-zA-Z0-9_-]+)\]/);
-  if (matchDex && matchDex.groups) {
-    result.status = matchDex.groups.status;
-    result.reason = matchDex.groups.reason;
+  const bracketMatch = text.match(/\[status=(?<status>[a-zA-Z0-9_-]+)\](?:\s+\[reason=(?<reason>[a-zA-Z0-9_-]+)\])?/i);
+  if (bracketMatch && bracketMatch.groups) {
+    if (bracketMatch.groups.status) result.status = bracketMatch.groups.status;
+    if (bracketMatch.groups.reason) result.reason = bracketMatch.groups.reason;
+    return result;
+  }
+
+  const filterMatch = text.match(/(?:compilation[-_\s]*filter|status)[=:\s]+(?<status>[a-zA-Z0-9_-]+)/i);
+  if (filterMatch && filterMatch.groups && filterMatch.groups.status) {
+    result.status = filterMatch.groups.status;
+  }
+
+  const reasonMatch = text.match(/(?:compilation[-_\s]*reason|reason)[=:\s]+(?<reason>[a-zA-Z0-9_-]+)/i);
+  if (reasonMatch && reasonMatch.groups && reasonMatch.groups.reason) {
+    result.reason = reasonMatch.groups.reason;
   }
 
   return result;

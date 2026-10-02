@@ -276,11 +276,42 @@ export class AdbController {
       // fallback
     }
 
-    onProgress?.({ phase: 3, message: '正在串流剖析 ART Dexopt 編譯狀態 (dumpsys package)...' });
-    this.log('掃描', '步驟 3/3: 執行 dumpsys package 批次提取 Dexopt 狀態');
+    onProgress?.({ phase: 3, message: '正在批次提取 ART Dexopt 編譯狀態 (dumpsys package dexopt)...' });
+    this.log('掃描', '步驟 3/3: 批次提取 Dexopt 狀態 (dumpsys package dexopt)');
     
-    const dumpsysRes = await this.exec(['dumpsys', 'package']);
-    const dexoptMap = parseDumpsysPackageStream(dumpsysRes.stdout);
+    let dexoptRaw = '';
+    // Priority 1: dumpsys package dexopt (fast targeted dump on Android 7-17)
+    try {
+      const res = await this.exec(['dumpsys', 'package', 'dexopt']);
+      if (res.stdout && res.stdout.length > 50) {
+        dexoptRaw = res.stdout;
+        this.log('掃描', `已透過 dumpsys package dexopt 取得資料 (${dexoptRaw.length} 字元)`);
+      }
+    } catch (e) {
+      this.log('警告', `dumpsys package dexopt 失敗: ${e.message}`);
+    }
+
+    // Priority 2: pm art dump (Android 14+ ART Service)
+    if (!dexoptRaw) {
+      try {
+        const res = await this.exec(['pm', 'art', 'dump']);
+        if (res.stdout && res.stdout.length > 50) {
+          dexoptRaw = res.stdout;
+          this.log('掃描', `已透過 pm art dump 取得資料 (${dexoptRaw.length} 字元)`);
+        }
+      } catch (e) {
+        // fallback
+      }
+    }
+
+    // Priority 3: dumpsys package (full dump fallback)
+    if (!dexoptRaw) {
+      this.log('掃描', '備援執行完整 dumpsys package...');
+      const res = await this.exec(['dumpsys', 'package']);
+      dexoptRaw = res.stdout;
+    }
+
+    const dexoptMap = parseDumpsysPackageStream(dexoptRaw);
     this.log('掃描', `成功解析 ${dexoptMap.size} 個套件之 Dexopt 紀錄`);
 
     onProgress?.({ phase: 4, message: '正在分群歸類應用程式 (常用 / 一般 / 不支援 AOT)...' });
