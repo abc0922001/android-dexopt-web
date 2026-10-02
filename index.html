@@ -46,12 +46,12 @@
         </div>
 
         <!-- Theme Toggle -->
-        <button id="btnThemeToggle" title="切換明暗主題" class="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer">
+        <button id="btnThemeToggle" aria-label="切換深淺色主題 (Toggle dark/light theme)" title="切換明暗主題" class="w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer flex items-center justify-center">
           <span id="themeIcon"></span>
         </button>
 
         <!-- Log Drawer Toggle -->
-        <button id="btnToggleLog" title="切換日誌抽屜" class="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer relative">
+        <button id="btnToggleLog" aria-label="切換終端日誌 (Toggle terminal log drawer)" title="切換日誌抽屜" class="w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer relative flex items-center justify-center">
           <svg class="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           <span id="logActiveDot" class="hidden absolute top-2 right-2 w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
         </button>
@@ -108,23 +108,23 @@
           placeholder="Search..."
           class="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-xl text-sm placeholder-slate-400 dark:placeholder-slate-500 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all shadow-sm"
         />
-        <button id="btnClearSearch" class="hidden absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 cursor-pointer">
+        <button id="btnClearSearch" aria-label="清除搜尋內容 (Clear search input)" title="清除搜尋" class="hidden absolute inset-y-0 right-0 pr-3 w-10 h-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
           <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
       <!-- Filter Category Pills -->
-      <div class="flex items-center gap-2 overflow-x-auto pb-1 text-sm no-scrollbar">
-        <button data-filter="all" class="filter-pill active px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+      <div class="flex items-center gap-2 overflow-x-auto pb-1 text-sm no-scrollbar" role="tablist" aria-label="應用程式分類篩選">
+        <button data-filter="all" class="filter-pill active" role="tab" aria-selected="true">
           All (<span id="countAll">0</span>)
         </button>
-        <button data-filter="frequently_used" class="filter-pill px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+        <button data-filter="frequently_used" class="filter-pill" role="tab" aria-selected="false">
           Frequently Used (<span id="countFrequentlyUsed">0</span>)
         </button>
-        <button data-filter="general" class="filter-pill px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+        <button data-filter="general" class="filter-pill" role="tab" aria-selected="false">
           General (<span id="countGeneral">0</span>)
         </button>
-        <button data-filter="cannot_aot" class="filter-pill px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+        <button data-filter="cannot_aot" class="filter-pill" role="tab" aria-selected="false">
           Cannot AOT (<span id="countCannotAot">0</span>)
         </button>
       </div>
@@ -133,11 +133,11 @@
     <!-- Main Content Area -->
     <main id="mainAppArea" class="flex-1 flex flex-col">
       <!-- Loading / Scanning State -->
-      <div id="scanningState" class="hidden py-16 flex flex-col items-center justify-center text-center">
+      <div id="scanningState" class="hidden py-16 flex flex-col items-center justify-center text-center" aria-live="polite">
         <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-4 animate-spin">
           <svg class="w-6 h-6 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         </div>
-        <h3 id="scanningTitle" class="text-base font-semibold text-slate-800 dark:text-slate-100 mb-1">正在掃描 Android ART 狀態...</h3>
+        <h2 id="scanningTitle" class="text-base font-semibold text-slate-800 dark:text-slate-100 mb-1">正在掃描 Android ART 狀態...</h2>
         <p id="scanningDesc" class="text-xs text-slate-500 dark:text-slate-400 max-w-sm">
           正在從裝置批次擷取套件資訊與 Dexopt 編譯快照，這通常需要數秒鐘。
         </p>
@@ -243,13 +243,13 @@
         <span class="font-semibold text-slate-300">Terminal & ADB Log Stream</span>
       </div>
       <div class="flex items-center gap-1.5">
-        <button id="btnCopyLog" title="複製所有日誌" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer">
-          <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        <button id="btnCopyLog" aria-label="複製所有日誌 (Copy all terminal logs)" title="複製所有日誌" class="w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer flex items-center justify-center">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
         </button>
-        <button id="btnClearLog" title="清除日誌" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer">
-          <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        <button id="btnClearLog" aria-label="清除所有日誌 (Clear all terminal logs)" title="清除日誌" class="w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer flex items-center justify-center">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>
-        <button id="btnCloseLog" title="收起抽屜" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer">
+        <button id="btnCloseLog" aria-label="收起抽屜 (Close terminal drawer)" title="收起抽屜" class="w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer flex items-center justify-center">
           <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
         </button>
       </div>
@@ -259,13 +259,13 @@
   </aside>
 
   <!-- Error / Alert Toast -->
-  <div id="toast" class="fixed top-5 right-5 max-w-md bg-slate-900 text-white border border-slate-700 rounded-xl p-4 shadow-2xl z-50 transform transition-all duration-300 translate-y-[-120%] opacity-0 pointer-events-none flex items-start gap-3">
+  <div id="toast" role="alert" aria-live="assertive" class="fixed top-5 right-5 max-w-md bg-slate-900 text-white border border-slate-700 rounded-xl p-4 shadow-2xl z-50 transform transition-all duration-300 translate-y-[-120%] opacity-0 pointer-events-none flex items-start gap-3">
     <div id="toastIcon" class="shrink-0 mt-0.5 text-cyan-400"></div>
     <div class="flex-1 text-xs">
       <div id="toastTitle" class="font-bold mb-0.5 text-sm">提示</div>
       <div id="toastMessage" class="text-slate-300 leading-normal"></div>
     </div>
-    <button id="toastClose" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+    <button id="toastClose" aria-label="關閉通知 (Close notification)" title="關閉通知" class="w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 cursor-pointer flex items-center justify-center">
       <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
     </button>
   </div>

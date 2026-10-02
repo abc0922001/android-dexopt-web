@@ -185,18 +185,23 @@ function setDexoptMode(mode) {
   
   if (mode === 'speed') {
     el.modeSpeed.className = 'px-3.5 py-1 text-xs font-semibold rounded-lg bg-cyan-400 text-slate-950 shadow-sm transition-all cursor-pointer';
+    el.modeSpeed.setAttribute('aria-selected', 'true');
     el.modeSpeedProfile.className = 'px-3.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer';
+    el.modeSpeedProfile.setAttribute('aria-selected', 'false');
     el.modeHintText.textContent = 'Hint: speed 編譯所有位元碼，啟動速度最快，但消耗最多儲存空間。';
   } else {
     el.modeSpeedProfile.className = 'px-3.5 py-1 text-xs font-semibold rounded-lg bg-cyan-400 text-slate-950 shadow-sm transition-all cursor-pointer';
+    el.modeSpeedProfile.setAttribute('aria-selected', 'true');
     el.modeSpeed.className = 'px-3.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer';
+    el.modeSpeed.setAttribute('aria-selected', 'false');
     el.modeHintText.textContent = 'Hint: speed-profile 僅針對常用熱點編譯，平衡空間與效能（同系統背景預設）。';
   }
 
   // Update existing app optimize button labels
   document.querySelectorAll('.btn-optimize-app').forEach((btn) => {
     if (!btn.disabled) {
-      btn.innerHTML = `${ICONS.zap} Optimize (${state.dexoptMode})`;
+      btn.innerHTML = `${ICONS.zap} <span>Optimize (${state.dexoptMode})</span>`;
+      btn.setAttribute('aria-label', `最佳化 (使用 ${state.dexoptMode} 模式)`);
     }
   });
 }
@@ -212,11 +217,11 @@ function renderHeaderConnection() {
       <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold shadow-sm">
         <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
         <span>Connected: ${state.connectedDevice.title}</span>
-        <button id="btnDisconnect" title="中斷連線" class="ml-1 text-slate-400 hover:text-rose-400 cursor-pointer p-0.5">
+        <button id="btnDisconnect" aria-label="中斷裝置連線 (Disconnect device)" title="中斷連線" class="ml-1 w-6 h-6 min-w-[24px] min-h-[24px] rounded hover:bg-emerald-500/20 text-slate-400 hover:text-rose-400 cursor-pointer flex items-center justify-center">
           ${ICONS.clear}
         </button>
       </div>
-      <button id="btnRescan" title="重新掃描裝置" class="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
+      <button id="btnRescan" aria-label="重新掃描裝置應用 (Rescan apps)" title="重新掃描裝置" class="w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer flex items-center justify-center">
         ${ICONS.refresh}
       </button>
     `;
@@ -231,11 +236,11 @@ function renderHeaderConnection() {
     });
   } else {
     el.connectionContainer.innerHTML = `
-      <button id="btnConnect" class="px-4 py-2 rounded-xl text-sm font-semibold bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95">
+      <button id="btnConnect" aria-label="連接 USB 裝置 (Connect device)" class="min-h-[40px] px-4 py-2 rounded-xl text-sm font-semibold bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95">
         ${ICONS.usb}
         連接裝置 (Connect)
       </button>
-      <button id="btnDemoMode" class="px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all cursor-pointer">
+      <button id="btnDemoMode" aria-label="切換示範模式 (Switch to demo mode)" class="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-200/90 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all cursor-pointer flex items-center justify-center">
         示範模式 (Demo)
       </button>
     `;
@@ -385,17 +390,17 @@ function renderAppGrids() {
 }
 
 /**
- * Creates card HTML matching Dark.jfif and Light.jfif
+ * Creates card HTML matching Dark.jfif and Light.jfif with high contrast badges
  */
 function createAppCardHtml(app) {
   const isAotSupported = !app.isCannotAot;
 
-  // Status badge styling
-  let statusBadgeClass = 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300';
+  // High-contrast status badge styling compliant with WCAG AA (>= 4.5:1)
+  let statusBadgeClass = 'border-slate-400 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
   if (app.status === 'speed' || app.status === 'speed-profile') {
-    statusBadgeClass = 'border-emerald-500/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400';
+    statusBadgeClass = 'border-emerald-600 dark:border-emerald-500 bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200';
   } else if (app.status === 'verify' || app.status === 'quicken') {
-    statusBadgeClass = 'border-amber-500/40 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400';
+    statusBadgeClass = 'border-amber-600 dark:border-amber-500 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200';
   }
 
   // Reason badge styling
@@ -404,7 +409,8 @@ function createAppCardHtml(app) {
   const actionButton = isAotSupported ? `
     <button
       data-package="${app.packageName}"
-      class="btn-optimize-app px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-sm transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 shrink-0"
+      aria-label="最佳化 ${app.displayName} (使用 ${state.dexoptMode} 模式)"
+      class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-sm transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 shrink-0"
     >
       ${ICONS.zap}
       <span>Optimize (${state.dexoptMode})</span>
@@ -412,7 +418,8 @@ function createAppCardHtml(app) {
   ` : `
     <button
       disabled
-      class="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 cursor-not-allowed shrink-0"
+      aria-label="${app.displayName} 不支援 AOT 編譯"
+      class="min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 cursor-not-allowed shrink-0"
     >
       不支援 AOT
     </button>
@@ -427,7 +434,7 @@ function createAppCardHtml(app) {
             <h3 class="font-bold text-sm text-slate-900 dark:text-white truncate" title="${app.displayName}">
               ${app.displayName}
             </h3>
-            <p class="text-xs text-slate-400 font-mono truncate" title="${app.packageName}">
+            <p class="text-xs text-slate-500 dark:text-slate-400 font-mono truncate" title="${app.packageName}">
               ${app.packageName}
             </p>
           </div>
@@ -435,12 +442,12 @@ function createAppCardHtml(app) {
         ${actionButton}
       </div>
 
-      <!-- Badges Row -->
+      <!-- Badges Row with high contrast -->
       <div class="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100 dark:border-slate-800/50">
-        <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono border ${statusBadgeClass}">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${statusBadgeClass}">
           [status=${app.status}]
         </span>
-        <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono border ${reasonBadgeClass}">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${reasonBadgeClass}">
           [reason=${app.reason}]
         </span>
       </div>
@@ -536,8 +543,12 @@ el.btnClearSearch.addEventListener('click', () => {
 
 el.filterPills.forEach((pill) => {
   pill.addEventListener('click', () => {
-    el.filterPills.forEach((p) => p.classList.remove('active'));
+    el.filterPills.forEach((p) => {
+      p.classList.remove('active');
+      p.setAttribute('aria-selected', 'false');
+    });
     pill.classList.add('active');
+    pill.setAttribute('aria-selected', 'true');
     state.currentFilter = pill.dataset.filter;
     renderAppGrids();
   });
