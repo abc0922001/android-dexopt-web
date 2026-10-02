@@ -137,7 +137,7 @@
           </button>
         </div>
 
-        <!-- Sort Select -->
+        <!-- Sort Select & Re-sort Button -->
         <div class="flex items-center gap-2 shrink-0">
           <div class="relative flex items-center w-full sm:w-auto">
             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -158,6 +158,15 @@
               <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
             </div>
           </div>
+          <button
+            id="btnReapplySort"
+            aria-label="重新排序 (Re-apply sort)"
+            title="依目前選取的排序條件重新排列所有卡片"
+            class="min-h-[40px] px-3 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#131d2e] hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-cyan-600 dark:hover:text-cyan-400 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-semibold shadow-sm active:scale-95 shrink-0"
+          >
+            <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            <span>重新排序</span>
+          </button>
         </div>
       </div>
 

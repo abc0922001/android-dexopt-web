@@ -81,6 +81,7 @@ const el = {
   searchInput: document.getElementById('searchInput'),
   btnClearSearch: document.getElementById('btnClearSearch'),
   sortSelect: document.getElementById('sortSelect'),
+  btnReapplySort: document.getElementById('btnReapplySort'),
   filterPills: document.querySelectorAll('.filter-pill'),
 
   countAll: document.getElementById('countAll'),
@@ -330,6 +331,21 @@ el.btnDemoHero?.addEventListener('click', handleDemoMode);
 
 /* ---------------- App Scan & List Rendering ---------------- */
 
+function applySortOrder(sortMode = state.sortOrder) {
+  state.sortOrder = sortMode;
+  if (!state.apps || !Array.isArray(state.apps.frequentlyUsed)) return;
+
+  if (sortMode === 'default') {
+    state.apps.frequentlyUsed = sortApps(state.apps.frequentlyUsed, 'usage_desc');
+    state.apps.general = sortApps(state.apps.general, 'name_asc');
+    state.apps.cannotAot = sortApps(state.apps.cannotAot, 'name_asc');
+  } else {
+    state.apps.frequentlyUsed = sortApps(state.apps.frequentlyUsed, sortMode);
+    state.apps.general = sortApps(state.apps.general, sortMode);
+    state.apps.cannotAot = sortApps(state.apps.cannotAot, sortMode);
+  }
+}
+
 async function startAppScan() {
   if (state.isScanning) return;
   state.isScanning = true;
@@ -347,6 +363,7 @@ async function startAppScan() {
     });
 
     state.apps = classified;
+    applySortOrder(state.sortOrder);
     updatePillCounts();
     renderAppGrids();
 
@@ -399,9 +416,9 @@ function renderAppGrids() {
     return true;
   };
 
-  const filteredFrequent = sortApps(state.apps.frequentlyUsed.filter(filterFn), state.sortOrder);
-  const filteredGeneral = sortApps(state.apps.general.filter(filterFn), state.sortOrder);
-  const filteredCannotAot = sortApps(state.apps.cannotAot.filter(filterFn), state.sortOrder);
+  const filteredFrequent = state.apps.frequentlyUsed.filter(filterFn);
+  const filteredGeneral = state.apps.general.filter(filterFn);
+  const filteredCannotAot = state.apps.cannotAot.filter(filterFn);
 
   // Filter category visibility
   const isTypeFilter = state.currentFilter === 'all' || state.currentFilter === 'user' || state.currentFilter === 'system';
@@ -545,6 +562,37 @@ function createAppCardHtml(app) {
   `;
 }
 
+/**
+ * Updates a single app card in the DOM in-place without reordering or shifting the grid
+ */
+function updateAppCardInDom(app) {
+  const cardId = `card-${app.packageName.replace(/\./g, '_')}`;
+  const cardEl = document.getElementById(cardId);
+  if (!cardEl) {
+    renderAppGrids();
+    return;
+  }
+
+  const temp = document.createElement('div');
+  temp.innerHTML = createAppCardHtml(app);
+  const newCard = temp.firstElementChild;
+  if (!newCard) return;
+
+  cardEl.replaceWith(newCard);
+
+  // Bind single optimize action
+  const optBtn = newCard.querySelector('.btn-optimize-app');
+  optBtn?.addEventListener('click', async () => {
+    await handleOptimizeApp(app.packageName, optBtn);
+  });
+
+  // Bind single force-stop action
+  const stopBtn = newCard.querySelector('.btn-force-stop-app');
+  stopBtn?.addEventListener('click', () => {
+    openSingleForceStopModal(app.packageName, app.displayName);
+  });
+}
+
 /* ---------------- Single App Optimization ---------------- */
 
 async function handleOptimizeApp(packageName, buttonEl) {
@@ -571,9 +619,12 @@ async function handleOptimizeApp(packageName, buttonEl) {
       } else if (targetMode === 'speed' && updated.status === 'speed') {
         delete app.overrideMode;
       }
+
+      updateAppCardInDom(app);
+    } else {
+      renderAppGrids();
     }
 
-    renderAppGrids();
     if (targetMode === 'speed-profile' && updated.status === 'verify') {
       showToast(
         'Profile 未就緒，已切換按鈕',
@@ -680,13 +731,8 @@ async function handleStartBatch() {
       failedCount++;
       appendTerminalLog(`❌ [${app.packageName}] 編譯失敗: ${err.message}\n`);
     } finally {
-      // Re-render this app's card
-      const cardEl = document.getElementById(`card-${app.packageName.replace(/\./g, '_')}`);
-      if (cardEl) {
-        cardEl.outerHTML = createAppCardHtml(app);
-        const newBtn = document.querySelector(`[data-package="${app.packageName}"]`);
-        newBtn?.addEventListener('click', () => handleOptimizeApp(app.packageName, newBtn));
-      }
+      // Re-render this app's card in place
+      updateAppCardInDom(app);
     }
   }
 
@@ -897,8 +943,16 @@ el.filterPills.forEach((pill) => {
 });
 
 el.sortSelect?.addEventListener('change', (e) => {
-  state.sortOrder = e.target.value;
+  applySortOrder(e.target.value);
   renderAppGrids();
+});
+
+el.btnReapplySort?.addEventListener('click', () => {
+  applySortOrder(el.sortSelect ? el.sortSelect.value : state.sortOrder);
+  renderAppGrids();
+  const selectedOption = el.sortSelect?.options[el.sortSelect.selectedIndex];
+  const selectedText = selectedOption ? selectedOption.text : '目前排序';
+  showToast('已重新排序', `已依「${selectedText}」重新排列所有卡片。`, 'info');
 });
 
 /* ---------------- Initial Boot ---------------- */
