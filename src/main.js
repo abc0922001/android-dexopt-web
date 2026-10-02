@@ -1,11 +1,13 @@
 import { AdbController } from './adb-controller.js';
 import { getAppIcon, ICONS } from './icons.js';
+import { sortApps } from './parser.js';
 
 // Application State
 const state = {
   dexoptMode: 'speed-profile', // 'speed' | 'speed-profile'
   currentFilter: 'all',        // 'all' | 'frequently_used' | 'general' | 'cannot_aot'
   searchQuery: '',
+  sortOrder: 'default',        // 'default' | 'status_unknown_first' | 'status_speed_first' | 'name_asc' | 'usage_desc'
   theme: localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   connectedDevice: null,
   apps: {
@@ -48,6 +50,7 @@ const el = {
 
   searchInput: document.getElementById('searchInput'),
   btnClearSearch: document.getElementById('btnClearSearch'),
+  sortSelect: document.getElementById('sortSelect'),
   filterPills: document.querySelectorAll('.filter-pill'),
 
   countAll: document.getElementById('countAll'),
@@ -346,9 +349,9 @@ function renderAppGrids() {
     return app.displayName.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query);
   };
 
-  const filteredFrequent = state.apps.frequentlyUsed.filter(filterFn);
-  const filteredGeneral = state.apps.general.filter(filterFn);
-  const filteredCannotAot = state.apps.cannotAot.filter(filterFn);
+  const filteredFrequent = sortApps(state.apps.frequentlyUsed.filter(filterFn), state.sortOrder);
+  const filteredGeneral = sortApps(state.apps.general.filter(filterFn), state.sortOrder);
+  const filteredCannotAot = sortApps(state.apps.cannotAot.filter(filterFn), state.sortOrder);
 
   // Filter category visibility
   const showFrequent = (state.currentFilter === 'all' || state.currentFilter === 'frequently_used') && filteredFrequent.length > 0;
@@ -577,6 +580,11 @@ el.filterPills.forEach((pill) => {
     state.currentFilter = pill.dataset.filter;
     renderAppGrids();
   });
+});
+
+el.sortSelect?.addEventListener('change', (e) => {
+  state.sortOrder = e.target.value;
+  renderAppGrids();
 });
 
 /* ---------------- Initial Boot ---------------- */

@@ -97,20 +97,46 @@
 
     <!-- Search Bar & Filter Pills (Matches visual mockup) -->
     <div class="flex flex-col gap-3 mb-6">
-      <!-- Search Input -->
-      <div class="relative w-full">
-        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <!-- Search Input & Sort Controls -->
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <!-- Search Input -->
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+            <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          </div>
+          <input
+            id="searchInput"
+            type="text"
+            placeholder="Search..."
+            class="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-xl text-sm placeholder-slate-400 dark:placeholder-slate-500 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all shadow-sm"
+          />
+          <button id="btnClearSearch" aria-label="清除搜尋內容 (Clear search input)" title="清除搜尋" class="hidden absolute inset-y-0 right-0 pr-3 w-10 h-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
+            <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
         </div>
-        <input
-          id="searchInput"
-          type="text"
-          placeholder="Search..."
-          class="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-xl text-sm placeholder-slate-400 dark:placeholder-slate-500 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all shadow-sm"
-        />
-        <button id="btnClearSearch" aria-label="清除搜尋內容 (Clear search input)" title="清除搜尋" class="hidden absolute inset-y-0 right-0 pr-3 w-10 h-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
-          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
+
+        <!-- Sort Select -->
+        <div class="flex items-center gap-2 shrink-0">
+          <div class="relative flex items-center w-full sm:w-auto">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+              <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M6 10h12M9 16h6M11 20h2"/></svg>
+            </div>
+            <select
+              id="sortSelect"
+              aria-label="應用程式排序方式 (Sort order)"
+              class="w-full sm:w-auto pl-9 pr-8 py-2.5 bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all shadow-sm cursor-pointer appearance-none"
+            >
+              <option value="default">預設排序 (Default)</option>
+              <option value="status_unknown_first">依狀態：Unknown 優先</option>
+              <option value="status_speed_first">依狀態：Speed 優先</option>
+              <option value="name_asc">名稱：A → Z</option>
+              <option value="usage_desc">使用時間：高 → 低</option>
+            </select>
+            <div class="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-slate-400">
+              <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Filter Category Pills -->

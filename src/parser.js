@@ -458,3 +458,97 @@ export function formatDisplayName(pkg) {
   name = name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
   return name.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
+
+/**
+ * Priority score for Dexopt status depending on sort direction
+ * @param {string} status
+ * @param {'unknown_first' | 'speed_first'} direction
+ * @returns {number}
+ */
+export function getStatusPriority(status, direction = 'unknown_first') {
+  const norm = String(status || '').toLowerCase().trim();
+
+  if (direction === 'unknown_first') {
+    // unknown comes first, then error, verify, speed-profile, speed, N/A
+    switch (norm) {
+      case 'unknown':
+        return 100;
+      case 'error':
+        return 90;
+      case 'verify':
+      case 'quicken':
+      case 'run-from-apk':
+        return 80;
+      case 'speed-profile':
+        return 60;
+      case 'speed':
+      case 'everything':
+        return 40;
+      case 'n/a':
+      case 'no-code':
+        return 20;
+      default:
+        return 10;
+    }
+  } else {
+    // speed comes first, then speed-profile, verify, error, unknown, N/A
+    switch (norm) {
+      case 'speed':
+      case 'everything':
+        return 100;
+      case 'speed-profile':
+        return 80;
+      case 'verify':
+      case 'quicken':
+      case 'run-from-apk':
+        return 60;
+      case 'error':
+        return 40;
+      case 'unknown':
+        return 30;
+      case 'n/a':
+      case 'no-code':
+        return 20;
+      default:
+        return 10;
+    }
+  }
+}
+
+/**
+ * Sort an array of app objects based on sortMode
+ * @param {Array<object>} apps
+ * @param {string} sortMode - 'default' | 'status_unknown_first' | 'status_speed_first' | 'name_asc' | 'usage_desc'
+ * @returns {Array<object>} new sorted array
+ */
+export function sortApps(apps, sortMode = 'default') {
+  if (!Array.isArray(apps)) return [];
+  const list = [...apps];
+
+  switch (sortMode) {
+    case 'status_unknown_first':
+      return list.sort((a, b) => {
+        const diff = getStatusPriority(b.status, 'unknown_first') - getStatusPriority(a.status, 'unknown_first');
+        if (diff !== 0) return diff;
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+    case 'status_speed_first':
+      return list.sort((a, b) => {
+        const diff = getStatusPriority(b.status, 'speed_first') - getStatusPriority(a.status, 'speed_first');
+        if (diff !== 0) return diff;
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+    case 'name_asc':
+      return list.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+    case 'usage_desc':
+      return list.sort((a, b) => (b.foregroundMs || 0) - (a.foregroundMs || 0) || a.displayName.localeCompare(b.displayName));
+
+    case 'default':
+    default:
+      return list;
+  }
+}
+

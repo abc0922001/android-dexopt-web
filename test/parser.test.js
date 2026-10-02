@@ -10,6 +10,8 @@ import {
   parseSinglePackageDexopt,
   classifyApps,
   formatDisplayName,
+  getStatusPriority,
+  sortApps,
 } from '../src/parser.js';
 
 test('parsePackageList correctly parses third party and system packages', () => {
@@ -215,6 +217,52 @@ test('classifyApps ranks top frequently used apps by usage time and respects lim
   const generalPkgs = general.map((a) => a.packageName);
   assert.ok(generalPkgs.includes('app.light'));
   assert.ok(generalPkgs.includes('app.negligible'));
+});
+
+test('getStatusPriority ranks unknown highest for unknown_first and speed highest for speed_first', () => {
+  assert.ok(getStatusPriority('unknown', 'unknown_first') > getStatusPriority('verify', 'unknown_first'));
+  assert.ok(getStatusPriority('verify', 'unknown_first') > getStatusPriority('speed-profile', 'unknown_first'));
+  assert.ok(getStatusPriority('speed-profile', 'unknown_first') > getStatusPriority('speed', 'unknown_first'));
+
+  assert.ok(getStatusPriority('speed', 'speed_first') > getStatusPriority('speed-profile', 'speed_first'));
+  assert.ok(getStatusPriority('speed-profile', 'speed_first') > getStatusPriority('verify', 'speed_first'));
+  assert.ok(getStatusPriority('verify', 'speed_first') > getStatusPriority('unknown', 'speed_first'));
+});
+
+test('sortApps correctly sorts apps by status_unknown_first', () => {
+  const apps = [
+    { packageName: 'com.a', displayName: 'Alpha', status: 'speed' },
+    { packageName: 'com.b', displayName: 'Beta', status: 'unknown' },
+    { packageName: 'com.c', displayName: 'Gamma', status: 'verify' },
+    { packageName: 'com.d', displayName: 'Delta', status: 'speed-profile' },
+  ];
+
+  const sorted = sortApps(apps, 'status_unknown_first');
+  assert.equal(sorted[0].packageName, 'com.b'); // unknown
+  assert.equal(sorted[1].packageName, 'com.c'); // verify
+  assert.equal(sorted[2].packageName, 'com.d'); // speed-profile
+  assert.equal(sorted[3].packageName, 'com.a'); // speed
+});
+
+test('sortApps correctly sorts apps by status_speed_first, name_asc, and usage_desc', () => {
+  const apps = [
+    { packageName: 'com.a', displayName: 'Charlie', status: 'unknown', foregroundMs: 1000 },
+    { packageName: 'com.b', displayName: 'Bravo', status: 'speed', foregroundMs: 5000 },
+    { packageName: 'com.c', displayName: 'Alpha', status: 'verify', foregroundMs: 3000 },
+  ];
+
+  const speedFirst = sortApps(apps, 'status_speed_first');
+  assert.equal(speedFirst[0].packageName, 'com.b'); // speed
+
+  const nameAsc = sortApps(apps, 'name_asc');
+  assert.equal(nameAsc[0].displayName, 'Alpha');
+  assert.equal(nameAsc[1].displayName, 'Bravo');
+  assert.equal(nameAsc[2].displayName, 'Charlie');
+
+  const usageDesc = sortApps(apps, 'usage_desc');
+  assert.equal(usageDesc[0].packageName, 'com.b'); // 5000ms
+  assert.equal(usageDesc[1].packageName, 'com.c'); // 3000ms
+  assert.equal(usageDesc[2].packageName, 'com.a'); // 1000ms
 });
 
 
