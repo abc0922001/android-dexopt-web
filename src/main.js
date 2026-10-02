@@ -19,6 +19,7 @@ const state = {
   isBgDexoptRunning: false,
   isBatchRunning: false,
   batchTargetMode: 'speed',
+  pendingForceStop: null, // null | { mode: 'single', packageName, displayName } | { mode: 'batch' }
   logDrawerOpen: false,
   logs: [],
 };
@@ -47,6 +48,7 @@ const el = {
   bgDexoptBtnText: document.getElementById('bgDexoptBtnText'),
   btnBatchSpeedProfile: document.getElementById('btnBatchSpeedProfile'),
   btnBatchSpeed: document.getElementById('btnBatchSpeed'),
+  btnBatchForceStop: document.getElementById('btnBatchForceStop'),
   btnCancelBatch: document.getElementById('btnCancelBatch'),
 
   batchProgressBarContainer: document.getElementById('batchProgressBarContainer'),
@@ -63,6 +65,14 @@ const el = {
   batchScopeSystemCount: document.getElementById('batchScopeSystemCount'),
   btnCancelBatchModal: document.getElementById('btnCancelBatchModal'),
   btnConfirmBatchModal: document.getElementById('btnConfirmBatchModal'),
+
+  forceStopConfirmModal: document.getElementById('forceStopConfirmModal'),
+  forceStopModalTitle: document.getElementById('forceStopModalTitle'),
+  forceStopTargetPkg: document.getElementById('forceStopTargetPkg'),
+  forceStopModalDesc: document.getElementById('forceStopModalDesc'),
+  forceStopScopeContainer: document.getElementById('forceStopScopeContainer'),
+  btnCancelForceStopModal: document.getElementById('btnCancelForceStopModal'),
+  btnConfirmForceStopModal: document.getElementById('btnConfirmForceStopModal'),
 
   modeSpeed: document.getElementById('modeSpeed'),
   modeSpeedProfile: document.getElementById('modeSpeedProfile'),
@@ -416,6 +426,15 @@ function renderAppGrids() {
     });
   });
 
+  // Attach force-stop event listeners
+  document.querySelectorAll('.btn-force-stop-app').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pkg = btn.dataset.package;
+      const name = btn.dataset.name;
+      openSingleForceStopModal(pkg, name);
+    });
+  });
+
   const totalVisible = (showFrequent ? filteredFrequent.length : 0) +
                        (showGeneral ? filteredGeneral.length : 0) +
                        (showCannotAot ? filteredCannotAot.length : 0);
@@ -493,7 +512,18 @@ function createAppCardHtml(app) {
             </p>
           </div>
         </div>
-        ${actionButton}
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            data-package="${app.packageName}"
+            data-name="${app.displayName}"
+            aria-label="強制停止 ${app.displayName} (Force Stop)"
+            title="強制停止應用程式 (am force-stop)"
+            class="btn-force-stop-app min-h-[38px] w-[38px] rounded-xl text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700/80 transition-all cursor-pointer flex items-center justify-center active:scale-95 shrink-0"
+          >
+            ${ICONS.stop}
+          </button>
+          ${actionButton}
+        </div>
       </div>
 
       <!-- Badges Row with high contrast & type identifier -->
@@ -687,6 +717,100 @@ function handleCancelBatch() {
   }
 }
 
+/* ---------------- Force Stop Actions ---------------- */
+
+function openSingleForceStopModal(packageName, displayName) {
+  state.pendingForceStop = { mode: 'single', packageName, displayName };
+
+  if (el.forceStopModalTitle) {
+    el.forceStopModalTitle.textContent = `強制停止「${displayName}」？`;
+  }
+  if (el.forceStopTargetPkg) {
+    el.forceStopTargetPkg.textContent = packageName;
+  }
+  if (el.forceStopModalDesc) {
+    el.forceStopModalDesc.innerHTML = `
+      強制停止將透過 <code class="px-1 py-0.5 bg-rose-200/50 dark:bg-rose-900/50 rounded font-mono text-[11px]">am force-stop ${packageName}</code> 立即終止該應用的所有進行中處理程序與背景服務，未儲存的內容可能遺失。下次開啟時，系統將重新載入最新編譯的 AOT 最佳化機器碼。
+    `;
+  }
+  el.forceStopScopeContainer?.classList.add('hidden');
+  el.forceStopConfirmModal?.classList.remove('hidden');
+}
+
+function openBatchForceStopModal() {
+  state.pendingForceStop = { mode: 'batch' };
+
+  if (el.forceStopModalTitle) {
+    el.forceStopModalTitle.textContent = '批次強制停止應用程式？';
+  }
+  if (el.forceStopTargetPkg) {
+    el.forceStopTargetPkg.textContent = '執行指令: am force-stop <package>';
+  }
+  if (el.forceStopModalDesc) {
+    el.forceStopModalDesc.innerHTML = `
+      批次強制停止將依所選範圍，逐一終止應用程式的所有背景進程與快取服務。這能確保剛編譯完畢的 AOT 最佳化機器碼在下次啟動時被立即重新載入。
+    `;
+  }
+  el.forceStopScopeContainer?.classList.remove('hidden');
+  el.forceStopConfirmModal?.classList.remove('hidden');
+}
+
+function closeForceStopModal() {
+  el.forceStopConfirmModal?.classList.add('hidden');
+  state.pendingForceStop = null;
+}
+
+async function handleConfirmForceStop() {
+  const pending = state.pendingForceStop;
+  closeForceStopModal();
+  if (!pending) return;
+
+  if (pending.mode === 'single') {
+    const { packageName, displayName } = pending;
+    try {
+      await adbController.forceStopApp(packageName, {
+        onOutput: (chunk) => appendTerminalLog(chunk),
+      });
+      showToast('成功強制停止', `已終止「${displayName}」之所有進行中處理程序與背景服務。`, 'info');
+    } catch (err) {
+      showToast('強制停止失敗', err.message, 'error');
+    }
+    return;
+  }
+
+  if (pending.mode === 'batch') {
+    const scopeEl = document.querySelector('input[name="forceStopScope"]:checked');
+    const scope = scopeEl ? scopeEl.value : 'user';
+
+    const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
+    const targets = scope === 'user'
+      ? allApps.filter((a) => !a.isSystem && !a.isCannotAot)
+      : allApps.filter((a) => !a.isCannotAot);
+
+    if (targets.length === 0) {
+      showToast('無目標應用', '選定範圍內無可強制停止的應用程式。', 'warning');
+      return;
+    }
+
+    appendTerminalLog(`\n========== 開始批次強制停止應用程式 (範圍: ${scope}, 總數: ${targets.length}) ==========\n`);
+    let count = 0;
+
+    for (const app of targets) {
+      try {
+        await adbController.forceStopApp(app.packageName, {
+          onOutput: (chunk) => appendTerminalLog(chunk),
+        });
+        count++;
+      } catch (err) {
+        appendTerminalLog(`❌ [${app.packageName}] 強制停止失敗: ${err.message}\n`);
+      }
+    }
+
+    appendTerminalLog(`\n========== 批次強制停止完成 (已終止 ${count} 個應用) ==========\n`);
+    showToast('批次強制停止完成', `已成功強制停止 ${count} 個應用程式。`, 'info');
+  }
+}
+
 /* ---------------- Global System bg-dexopt-job ---------------- */
 
 el.btnTriggerBgDexopt.addEventListener('click', async () => {
@@ -733,6 +857,12 @@ el.btnCancelBatchModal?.addEventListener('click', closeBatchModal);
 el.btnConfirmBatchModal?.addEventListener('click', handleStartBatch);
 el.btnCancelBatch?.addEventListener('click', handleCancelBatch);
 el.btnStopBatchProgress?.addEventListener('click', handleCancelBatch);
+
+/* ---------------- Force Stop Listeners ---------------- */
+
+el.btnBatchForceStop?.addEventListener('click', openBatchForceStopModal);
+el.btnCancelForceStopModal?.addEventListener('click', closeForceStopModal);
+el.btnConfirmForceStopModal?.addEventListener('click', handleConfirmForceStop);
 
 /* ---------------- Search & Filter Pills ---------------- */
 

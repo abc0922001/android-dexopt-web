@@ -391,6 +391,27 @@ export class AdbController {
     return updated;
   }
 
+  /**
+   * Force stop an application via `am force-stop <packageName>`
+   * @param {string} packageName
+   */
+  async forceStopApp(packageName, { onOutput } = {}) {
+    this.log('強制停止', `正在終止 [${packageName}] 之所有進程與背景服務...`);
+
+    if (this.isDemoMode) {
+      await new Promise((r) => setTimeout(r, 400));
+      const msg = `[am force-stop ${packageName}]: Process terminated successfully.\n`;
+      this.log('強制停止', `已成功強制停止示範應用 [${packageName}]`);
+      onOutput?.(msg, false);
+      return { stdout: msg, stderr: '', exitCode: 0 };
+    }
+
+    const cmd = ['am', 'force-stop', packageName];
+    const res = await this.exec(cmd, { onOutput });
+    this.log('完成', `已成功強制停止 [${packageName}]`);
+    return res;
+  }
+
   /* ---------------- Mock / Demo Methods for Instant Browser Testing ---------------- */
 
   async _mockExec(commandArray, { onOutput }) {
