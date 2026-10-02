@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Android Dexopt Studio Web - WebADB ART 效能最佳化工具</title>
+  <meta name="description" content="純前端 WebADB Android ART Dexopt 效能最佳化管理工具，支援 WebUSB、bg-dexopt-job 與單一 App AOT 編譯。" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2306b6d4'><path d='M13 10V3L4 14h7v7l9-11h-7z'/></svg>" />
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body class="bg-[#f8fafc] dark:bg-[#0c1322] text-slate-800 dark:text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
+
+  <!-- Main Container -->
+  <div class="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 flex flex-col">
+
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
+          <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+            Android Dexopt Studio Web
+          </h1>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            WebUSB ART AOT Compiler & Package Manager
+          </p>
+        </div>
+      </div>
+
+      <!-- Right Header Actions (Connection Status & Theme Switcher) -->
+      <div class="flex items-center gap-2.5 sm:gap-3 flex-wrap">
+        <!-- Connection Badge / Button -->
+        <div id="connectionContainer" class="flex items-center gap-2">
+          <!-- Populated by JS -->
+          <button id="btnConnect" class="px-4 py-2 rounded-xl text-sm font-semibold bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95">
+            <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4m4-10v16"/></svg>
+            連接裝置 (Connect)
+          </button>
+          <button id="btnDemoMode" class="px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all cursor-pointer">
+            示範模式 (Demo)
+          </button>
+        </div>
+
+        <!-- Theme Toggle -->
+        <button id="btnThemeToggle" title="切換明暗主題" class="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer">
+          <span id="themeIcon"></span>
+        </button>
+
+        <!-- Log Drawer Toggle -->
+        <button id="btnToggleLog" title="切換日誌抽屜" class="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer relative">
+          <svg class="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span id="logActiveDot" class="hidden absolute top-2 right-2 w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Top Global Actions Card (Faithfully matches Dark.jfif & Light.jfif) -->
+    <section class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5 mb-6 shadow-sm transition-all">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <!-- Left: Trigger System bg-dexopt-job -->
+        <div class="flex items-center gap-3">
+          <button id="btnTriggerBgDexopt" class="group relative px-6 py-3.5 rounded-xl font-semibold text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-[0_0_25px_rgba(6,182,212,0.3)] transition-all cursor-pointer flex items-center gap-2.5 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            <span id="bgDexoptBtnText">Trigger System bg-dexopt-job</span>
+          </button>
+          
+          <button id="btnCancelBgDexopt" class="hidden px-4 py-3.5 rounded-xl font-medium text-xs text-rose-500 hover:text-rose-400 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 transition-all cursor-pointer">
+            中斷任務 (Cancel)
+          </button>
+        </div>
+
+        <!-- Right: Dexopt Modes Selector -->
+        <div class="flex flex-col gap-1.5 md:items-end">
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-semibold text-slate-900 dark:text-slate-100">Dexopt modes</span>
+            <div class="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60" role="tablist">
+              <button id="modeSpeed" class="px-3.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer" role="tab">
+                speed
+              </button>
+              <button id="modeSpeedProfile" class="px-3.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer" role="tab">
+                speed-profile
+              </button>
+            </div>
+          </div>
+          <p id="modeHintText" class="text-xs text-slate-500 dark:text-slate-400 max-w-md">
+            Hint: speed-profile 僅針對常用熱點編譯，平衡空間與效能（同系統背景預設）。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Search Bar & Filter Pills (Matches visual mockup) -->
+    <div class="flex flex-col gap-3 mb-6">
+      <!-- Search Input -->
+      <div class="relative w-full">
+        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        </div>
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="Search..."
+          class="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-xl text-sm placeholder-slate-400 dark:placeholder-slate-500 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all shadow-sm"
+        />
+        <button id="btnClearSearch" class="hidden absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 cursor-pointer">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Filter Category Pills -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-1 text-sm no-scrollbar">
+        <button data-filter="all" class="filter-pill active px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+          All (<span id="countAll">0</span>)
+        </button>
+        <button data-filter="frequently_used" class="filter-pill px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+          Frequently Used (<span id="countFrequentlyUsed">0</span>)
+        </button>
+        <button data-filter="general" class="filter-pill px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+          General (<span id="countGeneral">0</span>)
+        </button>
+        <button data-filter="cannot_aot" class="filter-pill px-4 py-1.5 rounded-full font-medium text-xs transition-all cursor-pointer whitespace-nowrap">
+          Cannot AOT (<span id="countCannotAot">0</span>)
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main id="mainAppArea" class="flex-1 flex flex-col">
+      <!-- Loading / Scanning State -->
+      <div id="scanningState" class="hidden py-16 flex flex-col items-center justify-center text-center">
+        <div class="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-4 animate-spin">
+          <svg class="w-6 h-6 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </div>
+        <h3 id="scanningTitle" class="text-base font-semibold text-slate-800 dark:text-slate-100 mb-1">正在掃描 Android ART 狀態...</h3>
+        <p id="scanningDesc" class="text-xs text-slate-500 dark:text-slate-400 max-w-sm">
+          正在從裝置批次擷取套件資訊與 Dexopt 編譯快照，這通常需要數秒鐘。
+        </p>
+      </div>
+
+      <!-- Disconnected Onboarding Card -->
+      <div id="disconnectedState" class="py-12 px-6 bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-2xl text-center max-w-2xl mx-auto my-6 shadow-sm">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-500 dark:text-cyan-400 mb-4">
+          <svg class="w-8 h-8 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4m4-10v16"/></svg>
+        </div>
+        <h2 class="text-lg font-bold text-slate-900 dark:text-white mb-2">尚未連接 Android 裝置</h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
+          請使用 USB 傳輸線連接 Android 手機，或點擊下方示範模式直接預覽完整介面與最佳化流程。
+        </p>
+
+        <div class="text-left bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl p-4 mb-6 text-xs text-slate-600 dark:text-slate-300 space-y-2">
+          <p class="font-semibold text-slate-800 dark:text-slate-200">連線前準備步驟：</p>
+          <div class="flex items-start gap-2">
+            <span class="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-500 dark:text-cyan-400 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">1</span>
+            <span>手機開啟【設定】>【關於手機】> 連續點擊「版本號碼」7次啟用開發人員選項。</span>
+          </div>
+          <div class="flex items-start gap-2">
+            <span class="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-500 dark:text-cyan-400 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">2</span>
+            <span>前往【系統】>【開發人員選項】> 開啟「USB 偵錯」。</span>
+          </div>
+          <div class="flex items-start gap-2">
+            <span class="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-500 dark:text-cyan-400 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">3</span>
+            <span>點擊下方「連接裝置」，並於手機彈出視窗勾選「永遠允許這台電腦進行偵錯」。</span>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-center gap-3">
+          <button id="btnConnectHero" class="px-5 py-2.5 rounded-xl font-semibold text-sm bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20 transition-all cursor-pointer active:scale-95">
+            連接裝置 (Connect Device)
+          </button>
+          <button id="btnDemoHero" class="px-4 py-2.5 rounded-xl font-medium text-sm text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer">
+            ✨ 開啟示範模式 (Demo Pixel 8)
+          </button>
+        </div>
+      </div>
+
+      <!-- App Lists Container -->
+      <div id="appListContainer" class="hidden flex-1 space-y-8">
+        
+        <!-- Section: Frequently Used Apps -->
+        <section id="sectionFrequentlyUsed" class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>Frequently Used Apps</span>
+              <span class="text-xs font-normal text-slate-500 dark:text-slate-400">(常用應用程式)</span>
+            </h2>
+            <span class="text-xs text-slate-400 font-mono" id="labelFrequentlyUsedCount">0 apps</span>
+          </div>
+          <div id="gridFrequentlyUsed" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- App Cards inserted here -->
+          </div>
+        </section>
+
+        <!-- Section: General Apps -->
+        <section id="sectionGeneral" class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>General Apps</span>
+              <span class="text-xs font-normal text-slate-500 dark:text-slate-400">(其他已安裝應用程式)</span>
+            </h2>
+            <span class="text-xs text-slate-400 font-mono" id="labelGeneralCount">0 apps</span>
+          </div>
+          <div id="gridGeneral" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- App Cards inserted here -->
+          </div>
+        </section>
+
+        <!-- Section: Cannot AOT -->
+        <section id="sectionCannotAot" class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>Cannot AOT / No-Code Modules</span>
+              <span class="text-xs font-normal text-slate-500 dark:text-slate-400">(不支援 AOT / 純資產與主題包)</span>
+            </h2>
+            <span class="text-xs text-slate-400 font-mono" id="labelCannotAotCount">0 apps</span>
+          </div>
+          <div id="gridCannotAot" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- App Cards inserted here -->
+          </div>
+        </section>
+
+        <!-- Empty search results -->
+        <div id="emptySearchNotice" class="hidden py-16 text-center text-slate-400 text-sm">
+          查無符合「<span id="emptySearchQuery" class="font-semibold text-slate-300"></span>」的應用程式。
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Realtime Terminal / Log Drawer (Collapsible bottom drawer) -->
+  <aside id="logDrawer" class="fixed bottom-0 inset-x-0 bg-slate-950/95 text-slate-200 border-t border-slate-800 shadow-2xl backdrop-blur-md z-40 transition-transform duration-300 transform translate-y-full">
+    <!-- Drawer Header -->
+    <div class="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-xs">
+      <div class="flex items-center gap-2 font-mono">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span class="font-semibold text-slate-300">Terminal & ADB Log Stream</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button id="btnCopyLog" title="複製所有日誌" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer">
+          <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        </button>
+        <button id="btnClearLog" title="清除日誌" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer">
+          <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+        <button id="btnCloseLog" title="收起抽屜" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+      </div>
+    </div>
+    <!-- Terminal Body -->
+    <pre id="terminalContent" class="h-56 overflow-y-auto p-4 font-mono text-xs leading-relaxed text-slate-300 selection:bg-cyan-500 selection:text-slate-950 whitespace-pre-wrap"></pre>
+  </aside>
+
+  <!-- Error / Alert Toast -->
+  <div id="toast" class="fixed top-5 right-5 max-w-md bg-slate-900 text-white border border-slate-700 rounded-xl p-4 shadow-2xl z-50 transform transition-all duration-300 translate-y-[-120%] opacity-0 pointer-events-none flex items-start gap-3">
+    <div id="toastIcon" class="shrink-0 mt-0.5 text-cyan-400"></div>
+    <div class="flex-1 text-xs">
+      <div id="toastTitle" class="font-bold mb-0.5 text-sm">提示</div>
+      <div id="toastMessage" class="text-slate-300 leading-normal"></div>
+    </div>
+    <button id="toastClose" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+      <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

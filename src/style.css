@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply antialiased text-slate-800 dark:text-slate-100 bg-[#f8fafc] dark:bg-[#0c1322] min-h-screen transition-colors duration-200;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
+
+.filter-pill {
+  border: 1px solid rgba(226, 232, 240, 1);
+  background-color: #ffffff;
+  color: #475569;
+  transition: all 0.15s ease-in-out;
+}
+
+:is(.dark .filter-pill) {
+  border-color: rgba(30, 41, 59, 1);
+  background-color: #131d2e;
+  color: #cbd5e1;
+}
+
+.filter-pill:hover {
+  border-color: rgba(203, 213, 225, 1);
+}
+
+:is(.dark .filter-pill:hover) {
+  border-color: rgba(51, 65, 85, 1);
+}
+
+.filter-pill.active {
+  background-color: rgba(6, 182, 212, 0.15);
+  border-color: rgba(6, 182, 212, 0.5);
+  color: #0e7490;
+  font-weight: 600;
+}
+
+:is(.dark .filter-pill.active) {
+  background-color: rgba(6, 182, 212, 0.2);
+  border-color: rgba(6, 182, 212, 0.5);
+  color: #67e8f9;
+}
+
