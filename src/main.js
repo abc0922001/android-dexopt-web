@@ -188,13 +188,13 @@ function setDexoptMode(mode) {
     el.modeSpeed.setAttribute('aria-selected', 'true');
     el.modeSpeedProfile.className = 'px-3.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer';
     el.modeSpeedProfile.setAttribute('aria-selected', 'false');
-    el.modeHintText.textContent = 'Hint: speed 編譯所有位元碼，啟動速度最快，但消耗最多儲存空間。';
+    el.modeHintText.textContent = 'Hint: speed 強制完整 AOT 編譯所有位元碼，不依賴使用紀錄，啟動最快。';
   } else {
     el.modeSpeedProfile.className = 'px-3.5 py-1 text-xs font-semibold rounded-lg bg-cyan-400 text-slate-950 shadow-sm transition-all cursor-pointer';
     el.modeSpeedProfile.setAttribute('aria-selected', 'true');
     el.modeSpeed.className = 'px-3.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer';
     el.modeSpeed.setAttribute('aria-selected', 'false');
-    el.modeHintText.textContent = 'Hint: speed-profile 僅針對常用熱點編譯，平衡空間與效能（同系統背景預設）。';
+    el.modeHintText.textContent = 'Hint: speed-profile 僅針對熱點設定檔編譯；若 App 尚無 Profile 將退回 verify。';
   }
 
   // Update existing app optimize button labels
@@ -476,7 +476,11 @@ async function handleOptimizeApp(packageName, buttonEl) {
     }
 
     renderAppGrids();
-    showToast('最佳化成功', `已將 [${app?.displayName || packageName}] 編譯為 ${updated.status}。`, 'info');
+    if (state.dexoptMode === 'speed-profile' && updated.status === 'verify') {
+      showToast('Profile 未就緒', `[${app?.displayName || packageName}] 尚無足夠熱點紀錄 (Profile)，系統暫退回 verify；若要強制完整編譯，請切換至 speed 模式。`, 'warning');
+    } else {
+      showToast('最佳化成功', `已將 [${app?.displayName || packageName}] 編譯為 ${updated.status}。`, 'info');
+    }
   } catch (err) {
     showToast('最佳化失敗', err.message, 'error');
     buttonEl.disabled = false;
