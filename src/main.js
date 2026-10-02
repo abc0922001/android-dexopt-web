@@ -454,6 +454,11 @@ function createAppCardHtml(app) {
         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${reasonBadgeClass}">
           [reason=${app.reason}]
         </span>
+        ${app.usageTimeFormatted ? `
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border border-cyan-300 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 ml-auto" title="近期前景使用時間: ${app.usageTimeFormatted}">
+          ⏱️ ${app.usageTimeFormatted}
+        </span>
+        ` : ''}
       </div>
     </div>
   `;

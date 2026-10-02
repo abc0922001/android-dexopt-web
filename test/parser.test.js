@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parsePackageList,
+  parseDurationToMs,
+  formatUsageDuration,
   parseUsageStats,
   parseLauncherActivities,
   parseDumpsysPackageStream,
@@ -163,4 +165,56 @@ test('parseDumpsysPackageStream handles Android 14+ ART Service compilation filt
   assert.equal(map.get('com.google.android.calculator').status, 'verify');
   assert.equal(map.get('com.google.android.calculator').reason, 'vdex');
 });
+
+test('parseDurationToMs and formatUsageDuration handle varied time formats', () => {
+  assert.equal(parseDurationToMs('120000'), 120000);
+  assert.equal(parseDurationToMs('01:30:00'), 5400000);
+  assert.equal(parseDurationToMs('15:30'), 930000);
+  assert.equal(parseDurationToMs('1h20m'), 4800000);
+  assert.equal(parseDurationToMs('45m'), 2700000);
+
+  assert.equal(formatUsageDuration(5400000), '1h 30m');
+  assert.equal(formatUsageDuration(3600000), '1h');
+  assert.equal(formatUsageDuration(900000), '15m');
+  assert.equal(formatUsageDuration(30000), ''); // Under 1 minute returns empty
+});
+
+test('classifyApps ranks top frequently used apps by usage time and respects limit', () => {
+  const pkgList = [
+    { packageName: 'app.heavy', path: '/data/app/heavy.apk', isSystem: false },
+    { packageName: 'app.medium', path: '/data/app/medium.apk', isSystem: false },
+    { packageName: 'app.light', path: '/data/app/light.apk', isSystem: false },
+    { packageName: 'app.negligible', path: '/data/app/negligible.apk', isSystem: false },
+  ];
+
+  const usageMap = new Map([
+    ['app.heavy', { foregroundMs: 3600000 }], // 1 hour
+    ['app.medium', { foregroundMs: 1800000 }], // 30 mins
+    ['app.light', { foregroundMs: 300000 }], // 5 mins
+    ['app.negligible', { foregroundMs: 10000 }], // 10s (below min threshold)
+  ]);
+
+  const launcherSet = new Set(['app.heavy', 'app.medium', 'app.light', 'app.negligible']);
+  const dexoptMap = new Map();
+
+  // Limit frequently used to 2
+  const { frequentlyUsed, general } = classifyApps(pkgList, usageMap, launcherSet, dexoptMap, {
+    maxFrequentlyUsed: 2,
+    minForegroundMs: 120000,
+  });
+
+  // Only top 2 qualify for frequentlyUsed
+  assert.equal(frequentlyUsed.length, 2);
+  assert.equal(frequentlyUsed[0].packageName, 'app.heavy');
+  assert.equal(frequentlyUsed[0].usageTimeFormatted, '1h');
+  assert.equal(frequentlyUsed[1].packageName, 'app.medium');
+  assert.equal(frequentlyUsed[1].usageTimeFormatted, '30m');
+
+  // app.light and app.negligible should be in general
+  assert.equal(general.length, 2);
+  const generalPkgs = general.map((a) => a.packageName);
+  assert.ok(generalPkgs.includes('app.light'));
+  assert.ok(generalPkgs.includes('app.negligible'));
+});
+
 

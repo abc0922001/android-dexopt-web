@@ -254,11 +254,11 @@ export class AdbController {
     this.log('掃描', '步驟 2/3: 執行 dumpsys usagestats 與 Launcher 活動過濾');
     
     // Usage stats query
-    let usageSet = new Set();
+    let usageData = new Map();
     try {
       const usageRes = await this.exec(['dumpsys', 'usagestats']);
-      usageSet = parseUsageStats(usageRes.stdout);
-      this.log('掃描', `常用套件統計: 找到 ${usageSet.size} 個近期前景活躍應用`);
+      usageData = parseUsageStats(usageRes.stdout);
+      this.log('掃描', `常用套件統計: 找到 ${usageData.size} 個近期前景活躍應用`);
     } catch (e) {
       this.log('警告', `dumpsys usagestats 讀取失敗，將改以 Launcher 判定為主: ${e.message}`);
     }
@@ -315,7 +315,7 @@ export class AdbController {
     this.log('掃描', `成功解析 ${dexoptMap.size} 個套件之 Dexopt 紀錄`);
 
     onProgress?.({ phase: 4, message: '正在分群歸類應用程式 (常用 / 一般 / 不支援 AOT)...' });
-    const classified = classifyApps(Array.from(pkgMap.values()), usageSet, launcherSet, dexoptMap);
+    const classified = classifyApps(Array.from(pkgMap.values()), usageData, launcherSet, dexoptMap);
     
     this.log('掃描完成', `常用: ${classified.frequentlyUsed.length}, 一般: ${classified.general.length}, 不支援: ${classified.cannotAot.length}`);
     return classified;
@@ -447,6 +447,7 @@ export class AdbController {
         hasCode: true,
         isCannotAot: false,
         tier: 'frequently_used',
+        usageTimeFormatted: '2h 45m',
       },
       {
         packageName: 'jp.naver.line.android',
@@ -458,6 +459,7 @@ export class AdbController {
         hasCode: true,
         isCannotAot: false,
         tier: 'frequently_used',
+        usageTimeFormatted: '1h 30m',
       },
       {
         packageName: 'com.android.chrome.beta',
@@ -469,6 +471,7 @@ export class AdbController {
         hasCode: true,
         isCannotAot: false,
         tier: 'frequently_used',
+        usageTimeFormatted: '54m',
       },
       {
         packageName: 'com.google.android.youtube',
@@ -480,6 +483,7 @@ export class AdbController {
         hasCode: true,
         isCannotAot: false,
         tier: 'frequently_used',
+        usageTimeFormatted: '48m',
       },
       {
         packageName: 'com.spotify.music',
@@ -491,6 +495,7 @@ export class AdbController {
         hasCode: true,
         isCannotAot: false,
         tier: 'frequently_used',
+        usageTimeFormatted: '35m',
       },
       {
         packageName: 'org.telegram.messenger',
@@ -502,6 +507,7 @@ export class AdbController {
         hasCode: true,
         isCannotAot: false,
         tier: 'frequently_used',
+        usageTimeFormatted: '22m',
       },
     ];
 
