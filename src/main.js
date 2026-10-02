@@ -198,12 +198,7 @@ function setDexoptMode(mode) {
   }
 
   // Update existing app optimize button labels
-  document.querySelectorAll('.btn-optimize-app').forEach((btn) => {
-    if (!btn.disabled) {
-      btn.innerHTML = `${ICONS.zap} <span>Optimize (${state.dexoptMode})</span>`;
-      btn.setAttribute('aria-label', `最佳化 (使用 ${state.dexoptMode} 模式)`);
-    }
-  });
+  renderAppGrids();
 }
 
 el.modeSpeed.addEventListener('click', () => setDexoptMode('speed'));
@@ -406,14 +401,23 @@ function createAppCardHtml(app) {
   // Reason badge styling
   const reasonBadgeClass = statusBadgeClass;
 
+  const appMode = app.overrideMode || state.dexoptMode;
+  const isSpeedOverride = app.overrideMode === 'speed';
+
+
   const actionButton = isAotSupported ? `
     <button
       data-package="${app.packageName}"
-      aria-label="最佳化 ${app.displayName} (使用 ${state.dexoptMode} 模式)"
-      class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-sm transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 shrink-0"
+      data-mode="${appMode}"
+      aria-label="最佳化 ${app.displayName} (使用 ${appMode} 模式)"
+      class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold ${
+        isSpeedOverride
+          ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
+          : 'bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-sm'
+      } transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 shrink-0"
     >
       ${ICONS.zap}
-      <span>Optimize (${state.dexoptMode})</span>
+      <span>Optimize (${appMode})</span>
     </button>
   ` : `
     <button
@@ -462,22 +466,34 @@ async function handleOptimizeApp(packageName, buttonEl) {
   buttonEl.disabled = true;
   buttonEl.innerHTML = `${ICONS.spinner} <span>編譯中...</span>`;
 
+  const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
+  const app = allApps.find((a) => a.packageName === packageName);
+  const targetMode = buttonEl.dataset.mode || app?.overrideMode || state.dexoptMode;
+
   try {
-    const updated = await adbController.compileApp(packageName, state.dexoptMode, {
+    const updated = await adbController.compileApp(packageName, targetMode, {
       onOutput: (chunk) => appendTerminalLog(chunk),
     });
 
-    // Update in-memory app record
-    const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
-    const app = allApps.find((a) => a.packageName === packageName);
     if (app) {
       app.status = updated.status;
       app.reason = updated.reason;
+
+      // If compiled with speed-profile but fell back to verify, switch only this app's button to speed!
+      if (targetMode === 'speed-profile' && updated.status === 'verify') {
+        app.overrideMode = 'speed';
+      } else if (targetMode === 'speed' && updated.status === 'speed') {
+        delete app.overrideMode;
+      }
     }
 
     renderAppGrids();
-    if (state.dexoptMode === 'speed-profile' && updated.status === 'verify') {
-      showToast('Profile 未就緒', `[${app?.displayName || packageName}] 尚無足夠熱點紀錄 (Profile)，系統暫退回 verify；若要強制完整編譯，請切換至 speed 模式。`, 'warning');
+    if (targetMode === 'speed-profile' && updated.status === 'verify') {
+      showToast(
+        'Profile 未就緒，已切換按鈕',
+        `[${app?.displayName || packageName}] 暫退回 verify，已為此 App 切換為 Optimize (speed)，再次點擊即可強制完整編譯！`,
+        'warning'
+      );
     } else {
       showToast('最佳化成功', `已將 [${app?.displayName || packageName}] 編譯為 ${updated.status}。`, 'info');
     }
