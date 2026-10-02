@@ -46,7 +46,7 @@
 
 | 深色模式 (Dark Theme) | 淺色模式 (Light Theme) |
 | :---: | :---: |
-| ![Dark Theme](./img/Dark.jfif) | ![Light Theme](./img/Light.jfif) |
+| ![Dark Theme](./img/Dark.png) | ![Light Theme](./img/Light.png) |
 
 ---
 
