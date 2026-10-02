@@ -61,17 +61,33 @@
     <!-- Top Global Actions Card (Faithfully matches Dark.jfif & Light.jfif) -->
     <section class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5 mb-6 shadow-sm transition-all">
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <!-- Left: Trigger System bg-dexopt-job -->
-        <div class="flex items-center gap-3">
-          <button id="btnTriggerBgDexopt" class="group relative px-6 py-3.5 rounded-xl font-semibold text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-[0_0_25px_rgba(6,182,212,0.3)] transition-all cursor-pointer flex items-center gap-2.5 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
-            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+        <!-- Left: Trigger System bg-dexopt-job & Batch Compilation -->
+        <div class="flex flex-wrap items-center gap-2.5">
+          <button id="btnTriggerBgDexopt" class="group relative px-5 py-3 rounded-xl font-semibold text-xs sm:text-sm text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-[0_0_20px_rgba(6,182,212,0.25)] transition-all cursor-pointer flex items-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg class="w-4 h-4 sm:w-5 sm:h-5 fill-current" viewBox="0 0 24 24">
               <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
             </svg>
-            <span id="bgDexoptBtnText">Trigger System bg-dexopt-job</span>
+            <span id="bgDexoptBtnText">Trigger bg-dexopt-job</span>
           </button>
           
-          <button id="btnCancelBgDexopt" class="hidden px-4 py-3.5 rounded-xl font-medium text-xs text-rose-500 hover:text-rose-400 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 transition-all cursor-pointer">
+          <button id="btnCancelBgDexopt" class="hidden px-3.5 py-3 rounded-xl font-medium text-xs text-rose-500 hover:text-rose-400 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 transition-all cursor-pointer">
             中斷任務 (Cancel)
+          </button>
+
+          <!-- Batch Speed-Profile AOT -->
+          <button id="btnBatchSpeedProfile" aria-label="批次執行全部 speed-profile AOT" title="對多個應用程式執行 speed-profile 編譯" class="px-3.5 py-3 rounded-xl font-semibold text-xs text-slate-800 dark:text-slate-100 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg class="w-4 h-4 text-cyan-500 fill-current" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>全部 speed-profile AOT</span>
+          </button>
+
+          <!-- Batch Speed AOT -->
+          <button id="btnBatchSpeed" aria-label="批次執行全部 speed AOT" title="對多個應用程式強制執行 speed 完整 AOT 編譯" class="px-3.5 py-3 rounded-xl font-semibold text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg class="w-4 h-4 text-amber-500 fill-current" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            <span>全部 speed AOT</span>
+          </button>
+
+          <button id="btnCancelBatch" class="hidden px-3.5 py-3 rounded-xl font-medium text-xs text-rose-500 hover:text-rose-400 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 transition-all cursor-pointer">
+            中斷批次任務 (Stop)
           </button>
         </div>
 
@@ -147,6 +163,12 @@
         <button data-filter="frequently_used" class="filter-pill" role="tab" aria-selected="false">
           Frequently Used (<span id="countFrequentlyUsed">0</span>)
         </button>
+        <button data-filter="user" class="filter-pill" role="tab" aria-selected="false">
+          User Apps (<span id="countUser">0</span>)
+        </button>
+        <button data-filter="system" class="filter-pill" role="tab" aria-selected="false">
+          System Apps (<span id="countSystem">0</span>)
+        </button>
         <button data-filter="general" class="filter-pill" role="tab" aria-selected="false">
           General (<span id="countGeneral">0</span>)
         </button>
@@ -202,6 +224,24 @@
           <button id="btnDemoHero" class="px-4 py-2.5 rounded-xl font-medium text-sm text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer">
             ✨ 開啟示範模式 (Demo Pixel 8)
           </button>
+        </div>
+      </div>
+
+      <!-- Batch Progress Card -->
+      <div id="batchProgressBarContainer" class="hidden p-4 mb-6 bg-white dark:bg-[#131d2e] border border-cyan-500/40 rounded-2xl shadow-md space-y-2.5">
+        <div class="flex items-center justify-between text-xs">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></span>
+            <span id="batchProgressTitle" class="font-bold text-slate-800 dark:text-white">正在執行批次 AOT 編譯...</span>
+          </div>
+          <span id="batchProgressCount" class="font-mono text-cyan-600 dark:text-cyan-400 font-semibold">[0/0] (0%)</span>
+        </div>
+        <div class="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+          <div id="batchProgressBar" class="bg-gradient-to-r from-cyan-500 to-teal-400 h-2.5 rounded-full transition-all duration-300 w-0"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+          <span id="batchProgressCurrentApp" class="truncate max-w-[70%] font-mono">準備中...</span>
+          <button id="btnStopBatchProgress" class="text-rose-500 hover:text-rose-400 font-semibold cursor-pointer underline">中斷批次任務</button>
         </div>
       </div>
 
@@ -294,6 +334,86 @@
     <button id="toastClose" aria-label="關閉通知 (Close notification)" title="關閉通知" class="w-8 h-8 min-w-[32px] min-h-[32px] rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 cursor-pointer flex items-center justify-center">
       <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
     </button>
+  </div>
+
+  <!-- Batch Compile Confirmation Modal -->
+  <div id="batchConfirmModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="batchModalTitle">
+    <div class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-start gap-3.5">
+        <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-center justify-center shrink-0">
+          <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <div class="flex-1">
+          <h3 id="batchModalTitle" class="text-base font-bold text-slate-900 dark:text-white">
+            確認執行批次 AOT 編譯？
+          </h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            目標編譯模式：<span id="batchModalTargetMode" class="font-mono font-bold text-cyan-600 dark:text-cyan-400">speed</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Warning Alert Box -->
+      <div class="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3.5 text-xs text-amber-900 dark:text-amber-200 space-y-1.5 leading-relaxed">
+        <div class="font-semibold flex items-center gap-1.5 text-amber-950 dark:text-amber-100">
+          <span>⚠️ 執行時間與發熱提醒：</span>
+        </div>
+        <p>
+          批次最佳化將會對選定範圍內的所有應用程式逐一執行 AOT 編譯。過程<strong>可能會耗時較久（數分鐘至數十分鐘不等）</strong>，期間手機 CPU 運算頻率升高可能伴隨微發熱現象。請確保手機<strong>電量充足（建議 > 50%）</strong>或接上充電器，並保持 USB 連線穩定。
+        </p>
+      </div>
+
+      <!-- Target Scope Selection (分類系統與用戶安裝) -->
+      <div class="space-y-2">
+        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+          選擇編譯對象範圍 (Scope)：
+        </label>
+        <div class="space-y-2 text-xs">
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors">
+            <input type="radio" name="batchScope" value="user" checked class="text-cyan-500 focus:ring-cyan-500" />
+            <div class="flex-1 flex items-center justify-between">
+              <div>
+                <span class="font-semibold text-slate-900 dark:text-slate-100">僅用戶自己安裝的 App</span>
+                <span class="ml-1 text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">(推薦，通常最立竿見影)</span>
+              </div>
+              <span id="batchScopeUserCount" class="text-slate-500 dark:text-slate-400 font-mono text-xs">0 個</span>
+            </div>
+          </label>
+
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors">
+            <input type="radio" name="batchScope" value="all" class="text-cyan-500 focus:ring-cyan-500" />
+            <div class="flex-1 flex items-center justify-between">
+              <div>
+                <span class="font-semibold text-slate-900 dark:text-slate-100">全部支援的 App</span>
+                <span class="ml-1 text-[11px] text-slate-500 dark:text-slate-400">(含用戶安裝與系統內建)</span>
+              </div>
+              <span id="batchScopeAllCount" class="text-slate-500 dark:text-slate-400 font-mono text-xs">0 個</span>
+            </div>
+          </label>
+
+          <label class="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors">
+            <input type="radio" name="batchScope" value="system" class="text-cyan-500 focus:ring-cyan-500" />
+            <div class="flex-1 flex items-center justify-between">
+              <div>
+                <span class="font-semibold text-slate-900 dark:text-slate-100">僅系統自帶的 App</span>
+                <span class="ml-1 text-[11px] text-slate-500 dark:text-slate-400">(系統預裝與服務)</span>
+              </div>
+              <span id="batchScopeSystemCount" class="text-slate-500 dark:text-slate-400 font-mono text-xs">0 個</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button id="btnCancelBatchModal" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
+          取消
+        </button>
+        <button id="btnConfirmBatchModal" class="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-md shadow-cyan-500/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95">
+          <span>確定開始編譯</span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./src/main.js"></script>

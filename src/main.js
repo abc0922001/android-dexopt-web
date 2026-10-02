@@ -17,6 +17,8 @@ const state = {
   },
   isScanning: false,
   isBgDexoptRunning: false,
+  isBatchRunning: false,
+  batchTargetMode: 'speed',
   logDrawerOpen: false,
   logs: [],
 };
@@ -43,6 +45,24 @@ const el = {
   btnTriggerBgDexopt: document.getElementById('btnTriggerBgDexopt'),
   btnCancelBgDexopt: document.getElementById('btnCancelBgDexopt'),
   bgDexoptBtnText: document.getElementById('bgDexoptBtnText'),
+  btnBatchSpeedProfile: document.getElementById('btnBatchSpeedProfile'),
+  btnBatchSpeed: document.getElementById('btnBatchSpeed'),
+  btnCancelBatch: document.getElementById('btnCancelBatch'),
+
+  batchProgressBarContainer: document.getElementById('batchProgressBarContainer'),
+  batchProgressTitle: document.getElementById('batchProgressTitle'),
+  batchProgressCount: document.getElementById('batchProgressCount'),
+  batchProgressBar: document.getElementById('batchProgressBar'),
+  batchProgressCurrentApp: document.getElementById('batchProgressCurrentApp'),
+  btnStopBatchProgress: document.getElementById('btnStopBatchProgress'),
+
+  batchConfirmModal: document.getElementById('batchConfirmModal'),
+  batchModalTargetMode: document.getElementById('batchModalTargetMode'),
+  batchScopeUserCount: document.getElementById('batchScopeUserCount'),
+  batchScopeAllCount: document.getElementById('batchScopeAllCount'),
+  batchScopeSystemCount: document.getElementById('batchScopeSystemCount'),
+  btnCancelBatchModal: document.getElementById('btnCancelBatchModal'),
+  btnConfirmBatchModal: document.getElementById('btnConfirmBatchModal'),
 
   modeSpeed: document.getElementById('modeSpeed'),
   modeSpeedProfile: document.getElementById('modeSpeedProfile'),
@@ -55,6 +75,8 @@ const el = {
 
   countAll: document.getElementById('countAll'),
   countFrequentlyUsed: document.getElementById('countFrequentlyUsed'),
+  countUser: document.getElementById('countUser'),
+  countSystem: document.getElementById('countSystem'),
   countGeneral: document.getElementById('countGeneral'),
   countCannotAot: document.getElementById('countCannotAot'),
 
@@ -330,23 +352,41 @@ async function startAppScan() {
 }
 
 function updatePillCounts() {
-  const total = state.apps.frequentlyUsed.length + state.apps.general.length + state.apps.cannotAot.length;
-  el.countAll.textContent = total;
+  const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
+  const userCount = allApps.filter((a) => !a.isSystem && !a.isCannotAot).length;
+  const systemCount = allApps.filter((a) => a.isSystem && !a.isCannotAot).length;
+
+  el.countAll.textContent = allApps.length;
   el.countFrequentlyUsed.textContent = state.apps.frequentlyUsed.length;
+  if (el.countUser) el.countUser.textContent = userCount;
+  if (el.countSystem) el.countSystem.textContent = systemCount;
   el.countGeneral.textContent = state.apps.general.length;
   el.countCannotAot.textContent = state.apps.cannotAot.length;
 
   el.labelFrequentlyUsedCount.textContent = `${state.apps.frequentlyUsed.length} apps`;
   el.labelGeneralCount.textContent = `${state.apps.general.length} apps`;
   el.labelCannotAotCount.textContent = `${state.apps.cannotAot.length} apps`;
+
+  if (el.batchScopeUserCount) el.batchScopeUserCount.textContent = `${userCount} 個`;
+  if (el.batchScopeAllCount) el.batchScopeAllCount.textContent = `${userCount + systemCount} 個`;
+  if (el.batchScopeSystemCount) el.batchScopeSystemCount.textContent = `${systemCount} 個`;
 }
 
 function renderAppGrids() {
   const query = state.searchQuery.trim().toLowerCase();
 
   const filterFn = (app) => {
-    if (!query) return true;
-    return app.displayName.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query);
+    if (query) {
+      const match = app.displayName.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query);
+      if (!match) return false;
+    }
+    if (state.currentFilter === 'user') {
+      return !app.isSystem && !app.isCannotAot;
+    }
+    if (state.currentFilter === 'system') {
+      return app.isSystem && !app.isCannotAot;
+    }
+    return true;
   };
 
   const filteredFrequent = sortApps(state.apps.frequentlyUsed.filter(filterFn), state.sortOrder);
@@ -354,8 +394,9 @@ function renderAppGrids() {
   const filteredCannotAot = sortApps(state.apps.cannotAot.filter(filterFn), state.sortOrder);
 
   // Filter category visibility
-  const showFrequent = (state.currentFilter === 'all' || state.currentFilter === 'frequently_used') && filteredFrequent.length > 0;
-  const showGeneral = (state.currentFilter === 'all' || state.currentFilter === 'general') && filteredGeneral.length > 0;
+  const isTypeFilter = state.currentFilter === 'all' || state.currentFilter === 'user' || state.currentFilter === 'system';
+  const showFrequent = (isTypeFilter || state.currentFilter === 'frequently_used') && filteredFrequent.length > 0;
+  const showGeneral = (isTypeFilter || state.currentFilter === 'general') && filteredGeneral.length > 0;
   const showCannotAot = (state.currentFilter === 'all' || state.currentFilter === 'cannot_aot') && filteredCannotAot.length > 0;
 
   el.sectionFrequentlyUsed.style.display = showFrequent ? 'block' : 'none';
@@ -369,7 +410,7 @@ function renderAppGrids() {
 
   // Attach optimize event listeners
   document.querySelectorAll('.btn-optimize-app').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
+    btn.addEventListener('click', async () => {
       const pkg = btn.dataset.package;
       await handleOptimizeApp(pkg, btn);
     });
@@ -407,6 +448,10 @@ function createAppCardHtml(app) {
   const appMode = app.overrideMode || state.dexoptMode;
   const isSpeedOverride = app.overrideMode === 'speed';
 
+  // System vs User App badge
+  const typeBadge = app.isSystem
+    ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-300 dark:border-slate-700" title="系統內建應用程式">系統內建</span>`
+    : `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200 dark:border-sky-800" title="用戶自己安裝的應用程式">用戶安裝</span>`;
 
   const actionButton = isAotSupported ? `
     <button
@@ -449,8 +494,9 @@ function createAppCardHtml(app) {
         ${actionButton}
       </div>
 
-      <!-- Badges Row with high contrast -->
+      <!-- Badges Row with high contrast & type identifier -->
       <div class="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100 dark:border-slate-800/50">
+        ${typeBadge}
         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${statusBadgeClass}">
           [status=${app.status}]
         </span>
@@ -512,6 +558,133 @@ async function handleOptimizeApp(packageName, buttonEl) {
   }
 }
 
+/* ---------------- Batch AOT Optimization ---------------- */
+
+function openBatchModal(targetMode) {
+  if (state.isBatchRunning || state.isBgDexoptRunning) return;
+  state.batchTargetMode = targetMode;
+
+  if (el.batchModalTargetMode) {
+    el.batchModalTargetMode.textContent = targetMode;
+  }
+  updatePillCounts();
+  el.batchConfirmModal?.classList.remove('hidden');
+}
+
+function closeBatchModal() {
+  el.batchConfirmModal?.classList.add('hidden');
+}
+
+async function handleStartBatch() {
+  closeBatchModal();
+  if (state.isBatchRunning) return;
+
+  const targetMode = state.batchTargetMode || 'speed';
+  const scopeEl = document.querySelector('input[name="batchScope"]:checked');
+  const scope = scopeEl ? scopeEl.value : 'user';
+
+  const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
+  
+  let targetList = [];
+  if (scope === 'user') {
+    targetList = allApps.filter((a) => !a.isSystem && !a.isCannotAot);
+  } else if (scope === 'system') {
+    targetList = allApps.filter((a) => a.isSystem && !a.isCannotAot);
+  } else {
+    targetList = allApps.filter((a) => !a.isCannotAot);
+  }
+
+  if (targetList.length === 0) {
+    showToast('無法執行', '選定範圍內沒有可進行 AOT 編譯的應用程式。', 'warning');
+    return;
+  }
+
+  state.isBatchRunning = true;
+
+  // Open log drawer for visibility
+  setLogDrawer(true);
+
+  // UI state updates
+  el.batchProgressBarContainer?.classList.remove('hidden');
+  el.btnBatchSpeed?.setAttribute('disabled', 'true');
+  el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
+  el.btnTriggerBgDexopt?.setAttribute('disabled', 'true');
+  el.btnCancelBatch?.classList.remove('hidden');
+
+  let successCount = 0;
+  let failedCount = 0;
+
+  appendTerminalLog(`\n========== 開始批次 AOT 編譯 (目標模式: ${targetMode}, 範圍: ${scope}, 總數: ${targetList.length}) ==========\n`);
+
+  for (let i = 0; i < targetList.length; i++) {
+    if (!state.isBatchRunning) {
+      appendTerminalLog(`\n⚠️ 批次編譯已由使用者中斷。\n`);
+      showToast('批次編譯已中斷', `已執行 ${i}/${targetList.length} 個應用程式。`, 'warning');
+      break;
+    }
+
+    const app = targetList[i];
+    const pct = Math.round(((i + 1) / targetList.length) * 100);
+
+    if (el.batchProgressCount) el.batchProgressCount.textContent = `[${i + 1}/${targetList.length}] (${pct}%)`;
+    if (el.batchProgressBar) el.batchProgressBar.style.width = `${pct}%`;
+    if (el.batchProgressCurrentApp) el.batchProgressCurrentApp.textContent = `正在編譯 [${i + 1}/${targetList.length}]: ${app.displayName} (${app.packageName})`;
+
+    // Highlight app card
+    const cardBtn = document.querySelector(`[data-package="${app.packageName}"]`);
+    if (cardBtn) {
+      cardBtn.disabled = true;
+      cardBtn.innerHTML = `${ICONS.spinner} <span>編譯中...</span>`;
+    }
+
+    try {
+      const updated = await adbController.compileApp(app.packageName, targetMode, {
+        onOutput: (chunk) => appendTerminalLog(chunk),
+      });
+      app.status = updated.status;
+      app.reason = updated.reason;
+      successCount++;
+    } catch (err) {
+      failedCount++;
+      appendTerminalLog(`❌ [${app.packageName}] 編譯失敗: ${err.message}\n`);
+    } finally {
+      // Re-render this app's card
+      const cardEl = document.getElementById(`card-${app.packageName.replace(/\./g, '_')}`);
+      if (cardEl) {
+        cardEl.outerHTML = createAppCardHtml(app);
+        const newBtn = document.querySelector(`[data-package="${app.packageName}"]`);
+        newBtn?.addEventListener('click', () => handleOptimizeApp(app.packageName, newBtn));
+      }
+    }
+  }
+
+  appendTerminalLog(`\n========== 批次 AOT 編譯結束 (成功: ${successCount}, 失敗: ${failedCount}) ==========\n`);
+
+  if (state.isBatchRunning) {
+    showToast('批次編譯完成', `已成功最佳化 ${successCount} 個應用程式。`, 'info');
+  }
+
+  state.isBatchRunning = false;
+  el.btnBatchSpeed?.removeAttribute('disabled');
+  el.btnBatchSpeedProfile?.removeAttribute('disabled');
+  el.btnTriggerBgDexopt?.removeAttribute('disabled');
+  el.btnCancelBatch?.classList.add('hidden');
+
+  setTimeout(() => {
+    if (!state.isBatchRunning) {
+      el.batchProgressBarContainer?.classList.add('hidden');
+    }
+  }, 4000);
+}
+
+function handleCancelBatch() {
+  if (!state.isBatchRunning) return;
+  state.isBatchRunning = false;
+  if (el.batchProgressCurrentApp) {
+    el.batchProgressCurrentApp.textContent = '正在中斷任務，請稍候目前 App 完成...';
+  }
+}
+
 /* ---------------- Global System bg-dexopt-job ---------------- */
 
 el.btnTriggerBgDexopt.addEventListener('click', async () => {
@@ -549,6 +722,15 @@ el.btnCancelBgDexopt.addEventListener('click', async () => {
     showToast('中斷失敗', err.message, 'error');
   }
 });
+
+/* ---------------- Batch Compile Listeners ---------------- */
+
+el.btnBatchSpeedProfile?.addEventListener('click', () => openBatchModal('speed-profile'));
+el.btnBatchSpeed?.addEventListener('click', () => openBatchModal('speed'));
+el.btnCancelBatchModal?.addEventListener('click', closeBatchModal);
+el.btnConfirmBatchModal?.addEventListener('click', handleStartBatch);
+el.btnCancelBatch?.addEventListener('click', handleCancelBatch);
+el.btnStopBatchProgress?.addEventListener('click', handleCancelBatch);
 
 /* ---------------- Search & Filter Pills ---------------- */
 
