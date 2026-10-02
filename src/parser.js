@@ -439,6 +439,21 @@ export function formatDisplayName(pkg) {
     'com.spotify.music': 'Spotify',
     'com.netflix.mediaclient': 'Netflix',
     'com.twitter.android': 'X (Twitter)',
+    'com.android.chrome.beta': 'Chrome Beta',
+    'com.google.android.apps.messaging': 'Google Messages',
+    'com.google.android.apps.docs': 'Google Drive',
+    'com.google.android.play.games': 'Google Play Games',
+    'com.google.android.keep': 'Google Keep',
+    'com.google.android.contacts': 'Contacts',
+    'com.google.android.dialer': 'Phone',
+    'com.google.android.deskclock': 'Clock',
+    'com.google.android.apps.nexuslauncher': 'Pixel Launcher',
+    'com.google.android.apps.wallpaper': 'Wallpapers',
+    'com.google.android.gms': 'Google Play Services',
+    'com.google.android.gsf': 'Google Services Framework',
+    'com.android.systemui': 'System UI',
+    'com.tencent.mm': 'WeChat',
+    'com.facebook.orca': 'Messenger',
   };
 
   if (KNOWN_NAMES[pkg]) {

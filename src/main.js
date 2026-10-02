@@ -480,13 +480,15 @@ function createAppCardHtml(app) {
   return `
     <div id="card-${app.packageName.replace(/\./g, '_')}" class="bg-white dark:bg-[#131d2e] border border-slate-200/90 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700/80 rounded-2xl p-4 shadow-sm transition-all flex flex-col justify-between gap-3">
       <div class="flex items-start justify-between gap-3">
-        <div class="flex items-center gap-3 overflow-hidden">
-          ${getAppIcon(app.packageName)}
-          <div class="overflow-hidden">
-            <h3 class="font-bold text-sm text-slate-900 dark:text-white truncate" title="${app.displayName}">
+        <div class="flex items-start gap-3 min-w-0 flex-1">
+          <div class="shrink-0 mt-0.5">
+            ${getAppIcon(app.packageName)}
+          </div>
+          <div class="min-w-0 flex-1">
+            <h3 class="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words" title="${app.displayName}">
               ${app.displayName}
             </h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400 font-mono truncate" title="${app.packageName}">
+            <p class="text-xs text-slate-500 dark:text-slate-400 font-mono break-all mt-0.5" title="${app.packageName}">
               ${app.packageName}
             </p>
           </div>
