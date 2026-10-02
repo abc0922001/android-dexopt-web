@@ -104,19 +104,26 @@ export function parseUsageStats(text) {
   const lines = text.split(/\r?\n/);
 
   for (const line of lines) {
-    if (!line.includes('TOTAL_TIME_IN_FOREGROUND') && !line.includes('totalTimeInForeground') && !line.includes('totalTime')) {
+    if (!line.includes('totalTime') && !line.includes('TOTAL_TIME') && !line.includes('timeActive')) {
       continue;
     }
 
-    const pkgMatch = line.match(/package[=:"'\s]+([a-zA-Z0-9_\.]+)/i) || line.match(/([a-zA-Z0-9_\.]+)\s+totalTime/i);
-    const timeMatch = line.match(/(?:TOTAL_TIME_IN_FOREGROUND|totalTimeInForeground|totalTime)[=:"'\s]+([0-9a-zA-Z\:]+)/i);
+    const pkgMatch = line.match(/package[=:"'\s]+([a-zA-Z0-9_\.]+)/i) ||
+                     line.match(/([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)\s+(?:totalTime|time)/i);
+    const timeMatch = line.match(/(?:TOTAL_TIME_IN_FOREGROUND|totalTimeInForeground|totalTimeActive|totalTime|timeActive)[=:"'\s]+([0-9a-zA-Z\:\s]+)/i);
 
     if (pkgMatch && pkgMatch[1]) {
       const pkg = pkgMatch[1];
+      if (!pkg.includes('.')) continue;
+
       let ms = 0;
+      let hasExplicitTime = false;
       if (timeMatch && timeMatch[1]) {
-        ms = parseDurationToMs(timeMatch[1]);
-      } else {
+        hasExplicitTime = true;
+        const cleanTime = timeMatch[1].replace(/["']/g, '').trim();
+        ms = parseDurationToMs(cleanTime);
+      }
+      if (!hasExplicitTime && ms <= 0) {
         ms = 60000;
       }
 
@@ -147,11 +154,17 @@ export function parseLauncherActivities(text) {
   // Match lines like:
   // activity: com.google.android.youtube/com.google.android.youtube.HomeActivity
   // packageName=com.google.android.youtube
+  // 4a91b40 com.google.android.youtube/.app.honeycomb.Shell$HomeActivity filter 14d1019
+  // com.google.android.youtube/.HomeActivity
   for (const line of lines) {
     const pkgMatch = line.match(/packageName=([a-zA-Z0-9_\.]+)/) ||
-                     line.match(/(?:activity|component)[=:\s]+([a-zA-Z0-9_\.]+)\//);
+                     line.match(/(?:activity|component)[=:\s]+([a-zA-Z0-9_\.]+)\//) ||
+                     line.match(/(?:^|\s+)([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)\/[a-zA-Z0-9_\.\$]+/);
     if (pkgMatch && pkgMatch[1]) {
-      launcherPkgs.add(pkgMatch[1]);
+      const p = pkgMatch[1];
+      if (p.includes('.') && !p.startsWith('android.intent') && !p.startsWith('http')) {
+        launcherPkgs.add(p);
+      }
     }
   }
 
@@ -298,7 +311,7 @@ export function parseSinglePackageDexopt(text) {
  * @param {Map<string, { status: string, reason: string, hasCode: boolean, isOverlay: boolean }>} dexoptMap
  * @returns {{ frequentlyUsed: Array<object>, general: Array<object>, cannotAot: Array<object> }}
  */
-export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { maxFrequentlyUsed = 25, minForegroundMs = 120000 } = {}) {
+export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { maxFrequentlyUsed = 25, minForegroundMs = 0 } = {}) {
   const cannotAot = [];
   const candidates = [];
 
@@ -358,26 +371,42 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
   }
 
   // Calculate usage score to find truly frequently used apps:
-  // Apps with higher active usage time score highest.
-  // Launcher visibility gives a slight boost.
+  // 1. Actual usage time is the primary factor.
+  // 2. User launcher apps get priority over background services.
+  // 3. User-installed apps get priority over system apps.
   const scored = candidates.map((app) => {
-    let score = app.foregroundMs;
-    if (app.isLauncherApp && !app.isSystem && score > 0) {
-      score += 60000; // 1 min boost for user launcher apps
+    let score = app.foregroundMs || 0;
+    if (app.isLauncherApp && !app.isSystem) {
+      score += 180000; // 3 min boost for user launcher apps
+    } else if (!app.isSystem) {
+      score += 60000;  // 1 min boost for user-installed apps
     }
     return { app, score };
   });
 
-  // Sort candidates by usage score descending
-  scored.sort((a, b) => b.score - a.score);
+  // Sort candidates by score descending:
+  // 1. Higher score first
+  // 2. Higher foregroundMs first
+  // 3. User apps before system apps
+  // 4. Alphabetical display name
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if ((b.app.foregroundMs || 0) !== (a.app.foregroundMs || 0)) {
+      return (b.app.foregroundMs || 0) - (a.app.foregroundMs || 0);
+    }
+    if (a.app.isSystem !== b.app.isSystem) {
+      return a.app.isSystem ? 1 : -1;
+    }
+    return a.app.displayName.localeCompare(b.app.displayName);
+  });
 
   const frequentlyUsed = [];
   const general = [];
 
   for (const item of scored) {
     const app = item.app;
-    // Qualify for Frequently Used if it has meaningful usage and within top quota
-    if (frequentlyUsed.length < maxFrequentlyUsed && item.score >= minForegroundMs) {
+    // Qualify for Frequently Used if within top quota and meets minForegroundMs threshold
+    if (frequentlyUsed.length < maxFrequentlyUsed && item.score >= minForegroundMs && item.score > 0) {
       app.tier = 'frequently_used';
       frequentlyUsed.push(app);
     } else {
@@ -386,20 +415,28 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     }
   }
 
-  // Fallback ONLY when NO apps had usage stats (e.g. freshly rebooted or dumpsys usagestats unavailable)
-  const targetFallbackCount = Math.min(15, maxFrequentlyUsed);
-  if (frequentlyUsed.length === 0 && targetFallbackCount > 0) {
+  // Fallback: If frequentlyUsed is still 0 (e.g. minForegroundMs was set too high or zero usage recorded)
+  // Ensure the top candidates (preferring user-installed / launcher apps) are placed in Frequently Used!
+  if (frequentlyUsed.length === 0 && general.length > 0) {
+    const targetFallbackCount = Math.min(15, maxFrequentlyUsed, general.length);
+    // First try user apps
     for (let i = 0; i < general.length && frequentlyUsed.length < targetFallbackCount; i++) {
-      if (general[i].isLauncherApp && !general[i].isSystem) {
+      if (!general[i].isSystem) {
         const promoted = general.splice(i, 1)[0];
         promoted.tier = 'frequently_used';
         frequentlyUsed.push(promoted);
         i--;
       }
     }
+    // If still empty (all system apps), take top general apps
+    while (frequentlyUsed.length < targetFallbackCount && general.length > 0) {
+      const promoted = general.shift();
+      promoted.tier = 'frequently_used';
+      frequentlyUsed.push(promoted);
+    }
   }
 
-  // Frequently used sorted by actual usage time descending (most used first!)
+  // Frequently used sorted by actual usage time descending (most used first!), then name
   frequentlyUsed.sort((a, b) => (b.foregroundMs - a.foregroundMs) || a.displayName.localeCompare(b.displayName));
 
   // General apps sorted alphabetically

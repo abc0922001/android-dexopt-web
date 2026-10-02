@@ -265,4 +265,39 @@ test('sortApps correctly sorts apps by status_speed_first, name_asc, and usage_d
   assert.equal(usageDesc[2].packageName, 'com.a'); // 1000ms
 });
 
+test('classifyApps ensures Frequently Used is never empty when valid candidates exist', () => {
+  const pkgList = [
+    { packageName: 'com.android.chrome', path: '/data/app/chrome/base.apk', isSystem: false },
+    { packageName: 'jp.naver.line.android', path: '/data/app/line/base.apk', isSystem: false },
+    { packageName: 'com.google.android.youtube', path: '/data/app/youtube/base.apk', isSystem: false },
+    { packageName: 'com.android.settings', path: '/system/priv-app/Settings/base.apk', isSystem: true },
+  ];
+
+  // Completely empty usage map (e.g. freshly rebooted device)
+  const emptyUsage = new Map();
+  const launcherOutput = `
+Activity Resolver Table:
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        4a91b40 com.google.android.youtube/.Shell filter 14d1019
+        3b81c20 com.android.chrome/com.google.android.apps.chrome.Main filter 87b2123
+        2c91a10 jp.naver.line.android/.MainActivity filter 99a1212
+  `;
+  const launcherSet = parseLauncherActivities(launcherOutput);
+  const dexoptMap = new Map();
+
+  const { frequentlyUsed, general } = classifyApps(pkgList, emptyUsage, launcherSet, dexoptMap, {
+    maxFrequentlyUsed: 25,
+  });
+
+  assert.ok(frequentlyUsed.length > 0, 'Frequently used must have items');
+  const frequentPkgs = frequentlyUsed.map((a) => a.packageName);
+  assert.ok(frequentPkgs.includes('com.google.android.youtube'));
+  assert.ok(frequentPkgs.includes('com.android.chrome'));
+  assert.ok(frequentPkgs.includes('jp.naver.line.android'));
+  // System app settings remains in general
+  assert.ok(general.some((a) => a.packageName === 'com.android.settings'));
+});
+
+
 
