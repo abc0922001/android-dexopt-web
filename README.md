@@ -3,25 +3,42 @@
 [![Deploy to GitHub Pages](https://github.com/abc0922001/android-dexopt-web/actions/workflows/deploy.yml/badge.svg)](https://github.com/abc0922001/android-dexopt-web/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-純前端 WebADB Android ART Dexopt 效能最佳化管理工具。透過瀏覽器 WebUSB API 與 Android 裝置進行 ADB 通訊，提供視覺化的 ART 編譯狀態檢視、常用度排序、單一 App 手動編譯（`speed` / `speed-profile`），以及全局觸發系統級 `bg-dexopt-job`。
+純前端 WebADB Android ART Dexopt 效能最佳化管理工具。透過瀏覽器 WebUSB API 與 Android 裝置進行 ADB 通訊，提供視覺化的 ART 編譯狀態檢視、常用度與使用時間智慧排序、用戶/系統分類、單一/批次 App 手動編譯（`speed` / `speed-profile`）、應用程式強制停止（Force Stop），以及全局觸發系統級 `bg-dexopt-job`。
 
 ---
 
 ## 🌟 核心功能特色
 
 * **純靜態單頁應用 (SPA)**：無需在電腦安裝 Python、Node.js 伺服器或 Android SDK 命令列工具，直接使用支援 WebUSB 的現代瀏覽器（Chrome、Edge、Brave、Opera）即可操作。
-* **高階分層掃描 (Layered App Categorization)**：
-  * **常用應用 (Frequently Used)**：整合 `dumpsys usagestats` 前景活躍度統計與第三方 Launcher App 篩選，優先列出最需要 AOT 加速的應用。
-  * **一般應用 (General)**：完整列出可進行 AOT 編譯的系統預載 App、背景服務與工具。
-  * **不支援 AOT (Cannot AOT)**：自動識別純資產包、無程式碼模組（`hasCode=false`）、主題覆蓋包（Overlay）與無 Dex 檔案之套件。
-* **防凍結串流批次擷取 (No N+1 Queries)**：單次管線流式擷取 `dumpsys package` 與 `pm list packages -f`，即使裝置安裝 300+ 應用程式也能在數秒內解析完成。
+* **高階智慧分層掃描 (Smart App Categorization)**：
+  * **常用應用 (Frequently Used)**：智慧評分整合 `dumpsys usagestats` 前景活躍度統計與桌面啟動器（Launcher）活動，精準收錄最常用的 20~25 款核心應用，並標註近期前景使用時間（如 `⏱️ 1h 30m`）。
+  * **用戶安裝應用 (User Apps)**：自動區隔使用者自 Google Play 或手動安裝的第三方應用程式。
+  * **系統內建應用 (System Apps)**：清晰識別系統預載與底層架構應用程式。
+  * **一般應用 (General)**：完整收錄其餘可進行 AOT 編譯的背景服務與工具程式。
+  * **不支援 AOT (Cannot AOT)**：自動識別純資源包、無程式碼模組（`hasCode=false`）、主題覆蓋包（Overlay）與無 Dex 檔案之套件。
+* **一鍵批次 AOT 編譯 (Batch Optimization)**：
+  * 支援「全部 speed」與「全部 speed-profile」批次編譯。
+  * 提供彈性操作範圍選擇（僅用戶安裝 App、僅系統 App、或全部 App）與防誤觸確認對話框。
+  * 即時進度條（百分比、目前處理應用名稱、成功/失敗計數）與隨時中斷（Cancel）機制。
+  * 批次編譯效能最佳化：編譯過程略過單一 App 逐次查詢，全部完成或中途取消時統一單次批次同步最新狀態。
+* **應用強制停止 (Force Stop - `am force-stop`)**：
+  * 單一卡片與頂部批次雙重支援，點擊後彈出安全確認視窗。
+  * 迅速終止目標應用的進行中進程與快取服務，確保下次啟動時立即重新載入全新編譯的 AOT 最佳化機器碼。
+* **彈性排序與卡片穩定就地更新 (Stable In-place Update & Flexible Sorting)**：
+  * 支援多種排序維度：預設排序、狀態 Unknown 優先、狀態 Speed 優先、名稱 A→Z、使用時間 高→低。
+  * 排序由使用者明確觸發，並提供專屬「🔄 重新排序」按鈕。
+  * 單一或批次編譯完成後，卡片維持於原位置就地更新狀態與標籤，避免清單突發性跳動移位。
+* **智慧狀態降級與按鈕指引 (Smart Button Fallback)**：
+  * 若在 `speed-profile` 模式下因尚無 Profile 暫退回 `verify`，系統將自動把該 App 的按鈕切換為醒目的琥珀色 `Optimize (speed)`，方便一鍵補行完整編譯。
+* **寬螢幕最佳化排版 (Wide-screen & Ultrawide Responsive)**：
+  * 針對 21:9 超寬螢幕（如 2560×1080）與各類解析度進行格線自適應優化，完整呈現長名稱與套件名稱不截斷。
 * **雙重編譯模式選擇器 (Dexopt Mode Selector)**：
   * **`speed`**：完整 AOT 編譯所有位元碼，啟動速度最快，但消耗較多儲存空間。
   * **`speed-profile`**：依據 JIT 熱點設定檔進行重點編譯，平衡空間與效能（同系統預設）。
 * **全域系統排程控制**：支援一鍵觸發 Android 系統級 `bg-dexopt-job`，並提供隨時中斷任務（`cancel-bg-dexopt-job`）機制。
 * **即時終端輸出抽屜 (Live Terminal Drawer)**：即時串流顯示所有 ADB 指令輸出、執行時間與狀態，支援一鍵複製與清空。
-* **明暗雙色主題 (Dark / Light Mode)**：依據設計規範精準重現深色與淺色精緻介面，自動偵測系統喜好並持久化設定。
-* **內建模擬示範模式 (Interactive Demo Mode)**：即便手邊暫無實體 Android 裝置，也能立即一鍵進入模擬 Pixel 8 環境，體驗所有操作流程。
+* **明暗雙色主題 (Dark / Light Mode)**：完美適配高對比深色與淺色精緻介面，自動偵測系統喜好並持久化設定。
+* **內建模擬示範模式 (Interactive Demo Mode)**：即便手邊暫無實體 Android 裝置，也能立即一鍵進入模擬環境，體驗完整操作流程。
 
 ---
 
@@ -90,6 +107,12 @@ npm run preview
 * **瀏覽器不支援**：
   * WebUSB API 僅支援 Chromium 核心瀏覽器（Google Chrome、Microsoft Edge、Brave、Opera 等）。
   * 瀏覽器安全性規範要求必須於 HTTPS 或 `localhost` 環境下才能存取 WebUSB。
+* **編譯為 `speed-profile` 後狀態顯示 `[status=verify]`**：
+  * 代表該應用程式尚未在手機上累積足夠的使用記錄（Profile 未就緒），ART 編譯器會自動退回 verify。
+  * 系統會自動為該 App 切換按鈕為琥珀色的 `Optimize (speed)`，再次點擊即可強制進行無條件的完整 AOT 編譯。
+* **強制停止 (Force Stop) 的功用**：
+  * Android 應用在背景運行或快取中時，即使完成了 AOT 編譯，記憶體中仍可能在執行未最佳化的舊進程。
+  * 使用卡片上的「強制停止」按鈕終止該應用，能確保下次啟動時直接重新載入最新編譯的機器碼。
 
 ---
 
