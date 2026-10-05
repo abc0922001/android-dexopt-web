@@ -4,11 +4,12 @@
  * and provides real-time status tracking for running, waiting, and completed operations.
  */
 export class AotQueueManager {
-  constructor({ onProcessItem, onQueueChange } = {}) {
+  constructor({ onProcessItem, onQueueChange, onItemStatusChange } = {}) {
     this.queue = [];
     this.isProcessing = false;
     this.onProcessItem = onProcessItem || (async () => {});
     this.onQueueChange = onQueueChange || (() => {});
+    this.onItemStatusChange = onItemStatusChange || (() => {});
     this._nextId = 1;
   }
 
@@ -81,6 +82,7 @@ export class AotQueueManager {
     };
 
     this.queue.push(item);
+    this.notifyItemStatusChange(item);
     this.notifyChange();
     this.processNext();
     return { success: true, item };
@@ -95,6 +97,7 @@ export class AotQueueManager {
     if (item.status === 'waiting') {
       item.status = 'cancelled';
       item.completedAt = Date.now();
+      this.notifyItemStatusChange(item);
       this.notifyChange();
       return true;
     }
@@ -110,6 +113,7 @@ export class AotQueueManager {
       if (item.status === 'waiting') {
         item.status = 'cancelled';
         item.completedAt = Date.now();
+        this.notifyItemStatusChange(item);
         cancelled++;
       }
     }
@@ -125,6 +129,14 @@ export class AotQueueManager {
   clearFinished() {
     this.queue = this.queue.filter((i) => i.status === 'waiting' || i.status === 'running');
     this.notifyChange();
+  }
+
+  notifyItemStatusChange(item) {
+    try {
+      this.onItemStatusChange?.(item);
+    } catch {
+      // safe callback invocation
+    }
   }
 
   notifyChange() {
@@ -150,6 +162,7 @@ export class AotQueueManager {
     this.isProcessing = true;
     nextItem.status = 'running';
     nextItem.startedAt = Date.now();
+    this.notifyItemStatusChange(nextItem);
     this.notifyChange();
 
     try {
@@ -164,6 +177,7 @@ export class AotQueueManager {
       nextItem.completedAt = Date.now();
       nextItem.duration = `${((nextItem.completedAt - nextItem.startedAt) / 1000).toFixed(1)}s`;
     } finally {
+      this.notifyItemStatusChange(nextItem);
       this.isProcessing = false;
       this.notifyChange();
       // Continue next item in queue

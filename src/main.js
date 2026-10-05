@@ -163,43 +163,55 @@ const adbController = new AdbController({
   },
 });
 
+function findApp(packageName) {
+  return (
+    state.apps.frequentlyUsed.find((a) => a.packageName === packageName) ||
+    state.apps.general.find((a) => a.packageName === packageName) ||
+    state.apps.cannotAot.find((a) => a.packageName === packageName)
+  );
+}
+
 // Initialize AOT Task Queue Manager
 const queueManager = new AotQueueManager({
   onProcessItem: async (item) => {
-    const cardBtn = document.querySelector(`[data-package="${item.packageName}"]`);
-    if (cardBtn) {
-      cardBtn.disabled = true;
-      cardBtn.innerHTML = `${ICONS.spinner} <span class="truncate">編譯中...</span>`;
-    }
-
     appendTerminalLog(`\n[AOT 佇列] 正在編譯 [${item.displayName}] (${item.packageName})，模式: ${item.mode}...\n`);
-    const updated = await adbController.compileApp(item.packageName, item.mode, {
-      onOutput: (chunk) => appendTerminalLog(chunk),
-    });
+    try {
+      const updated = await adbController.compileApp(item.packageName, item.mode, {
+        onOutput: (chunk) => appendTerminalLog(chunk),
+      });
 
-    const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
-    const app = allApps.find((a) => a.packageName === item.packageName);
-    if (app) {
-      app.status = updated.status;
-      app.reason = updated.reason;
-      if (item.mode === 'speed-profile' && updated.status === 'verify') {
-        app.overrideMode = 'speed';
-        showToast(
-          'Profile 未就緒，已切換按鈕',
-          `[${app.displayName}] 暫退回 verify，已為此 App 切換為 Optimize (speed)。`,
-          'warning'
-        );
-      } else if (item.mode === 'speed' && updated.status === 'speed') {
-        delete app.overrideMode;
-        showToast('最佳化成功', `已將 [${app.displayName}] 編譯為 ${updated.status}。`, 'info');
-      } else {
-        showToast('最佳化完成', `[${app.displayName}] 編譯結果: ${updated.status}。`, 'info');
+      const app = findApp(item.packageName);
+      if (app) {
+        app.status = updated.status;
+        app.reason = updated.reason;
+        if (item.mode === 'speed-profile' && updated.status === 'verify') {
+          app.overrideMode = 'speed';
+          showToast(
+            'Profile 未就緒，已切換按鈕',
+            `[${app.displayName}] 暫退回 verify，已為此 App 切換為 Optimize (speed)。`,
+            'warning'
+          );
+        } else if (item.mode === 'speed' && updated.status === 'speed') {
+          delete app.overrideMode;
+          showToast('最佳化成功', `已將 [${app.displayName}] 編譯為 ${updated.status}。`, 'info');
+        } else {
+          showToast('最佳化完成', `[${app.displayName}] 編譯結果: ${updated.status}。`, 'info');
+        }
       }
+
+      return updated;
+    } catch (err) {
+      appendTerminalLog(`❌ [AOT 佇列] [${item.displayName}] 編譯失敗: ${err.message}\n`);
+      showToast('編譯失敗', `[${item.displayName}] ${err.message}`, 'error');
+      throw err;
+    }
+  },
+  onItemStatusChange: (item) => {
+    const app = findApp(item.packageName);
+    if (app) {
       updateAppCardInDom(app);
       updatePillCounts();
     }
-
-    return updated;
   },
   onQueueChange: (items) => {
     updateQueueUi(items);
@@ -595,6 +607,7 @@ function createAppCardHtml(app) {
     actionButton = `
       <button
         disabled
+        data-package="${app.packageName}"
         aria-label="${app.displayName} 正在 AOT 編譯中"
         class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 cursor-not-allowed shrink-0 flex items-center justify-center gap-1.5"
       >
@@ -606,6 +619,7 @@ function createAppCardHtml(app) {
     actionButton = `
       <button
         disabled
+        data-package="${app.packageName}"
         aria-label="${app.displayName} 已排入 AOT 佇列等待中"
         class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 cursor-not-allowed shrink-0 flex items-center justify-center gap-1.5"
       >
@@ -715,8 +729,12 @@ function updateAppCardInDom(app) {
 /* ---------------- Single App Optimization via Queue ---------------- */
 
 async function handleOptimizeApp(packageName, buttonEl) {
-  const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
-  const app = allApps.find((a) => a.packageName === packageName);
+  if (state.isBatchRunning || state.isBgDexoptRunning) {
+    showToast('系統忙碌中', '批次最佳化或系統背景任務進行中，請稍候再操作個別應用。', 'warning');
+    return;
+  }
+
+  const app = findApp(packageName);
   if (!app) return;
 
   const targetMode = buttonEl?.dataset?.mode || app.overrideMode || state.dexoptMode;
@@ -726,8 +744,6 @@ async function handleOptimizeApp(packageName, buttonEl) {
     showToast('已在佇列中', `[${app.displayName}] 已經在 AOT 執行佇列中等待或執行。`, 'info');
     return;
   }
-
-  updateAppCardInDom(app);
 
   if (queueManager.waitingCount > 0) {
     showToast(
@@ -1140,6 +1156,11 @@ function openSingleForceStopModal(packageName, displayName) {
 }
 
 function openBatchForceStopModal() {
+  if (state.isBatchRunning || state.isBgDexoptRunning) return;
+  if (queueManager.pendingCount > 0) {
+    showToast('佇列進行中', '目前尚有 App AOT 佇列在執行中，請等待完成後再執行批次強制停止。', 'warning');
+    return;
+  }
   state.pendingForceStop = { mode: 'batch' };
 
   if (el.forceStopModalTitle) {
@@ -1216,7 +1237,11 @@ async function handleConfirmForceStop() {
 /* ---------------- Global System bg-dexopt-job ---------------- */
 
 el.btnTriggerBgDexopt.addEventListener('click', async () => {
-  if (state.isBgDexoptRunning) return;
+  if (state.isBgDexoptRunning || state.isBatchRunning) return;
+  if (queueManager.pendingCount > 0) {
+    showToast('佇列進行中', '目前尚有 App AOT 佇列在執行中，請等待完成後再啟動系統背景最佳化。', 'warning');
+    return;
+  }
   state.isBgDexoptRunning = true;
 
   el.btnTriggerBgDexopt.disabled = true;

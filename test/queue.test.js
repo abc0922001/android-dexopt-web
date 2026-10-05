@@ -105,3 +105,74 @@ test('AotQueueManager handles errors cleanly without stopping queue', async () =
   assert.strictEqual(failed.error, 'Compilation simulated error');
   assert.strictEqual(success.status, 'completed');
 });
+
+test('AotQueueManager triggers onItemStatusChange with correct lifecycle transitions', async () => {
+  const statusTransitions = [];
+  const manager = new AotQueueManager({
+    onProcessItem: async (item) => {
+      await new Promise((r) => setTimeout(r, 40));
+      return { status: item.mode };
+    },
+    onItemStatusChange: (item) => {
+      statusTransitions.push({
+        pkg: item.packageName,
+        status: item.status,
+      });
+    },
+  });
+
+  manager.enqueue({ packageName: 'app.alpha' }, 'speed');
+  manager.enqueue({ packageName: 'app.beta' }, 'speed');
+
+  await new Promise((r) => setTimeout(r, 150));
+
+  // Verify app.alpha transitioned: waiting -> running -> completed
+  const alphaTransitions = statusTransitions.filter((t) => t.pkg === 'app.alpha').map((t) => t.status);
+  assert.deepStrictEqual(alphaTransitions, ['waiting', 'running', 'completed']);
+
+  // Verify app.beta transitioned: waiting -> running -> completed
+  const betaTransitions = statusTransitions.filter((t) => t.pkg === 'app.beta').map((t) => t.status);
+  assert.deepStrictEqual(betaTransitions, ['waiting', 'running', 'completed']);
+
+  // After completion, getItem must return undefined so card displays normal completed state (not stuck in compiling)
+  assert.strictEqual(manager.getItem('app.alpha'), undefined);
+  assert.strictEqual(manager.getItem('app.beta'), undefined);
+  assert.strictEqual(manager.isQueued('app.alpha'), false);
+  assert.strictEqual(manager.isQueued('app.beta'), false);
+});
+
+test('AotQueueManager triggers onItemStatusChange on cancel and failure', async () => {
+  const statusTransitions = [];
+  const manager = new AotQueueManager({
+    onProcessItem: async (item) => {
+      await new Promise((r) => setTimeout(r, 40));
+      if (item.packageName === 'app.err') {
+        throw new Error('Simulated failure');
+      }
+      return { status: 'speed' };
+    },
+    onItemStatusChange: (item) => {
+      statusTransitions.push({
+        pkg: item.packageName,
+        status: item.status,
+      });
+    },
+  });
+
+  manager.enqueue({ packageName: 'app.err' });
+  const item2 = manager.enqueue({ packageName: 'app.cancelling' }).item;
+
+  manager.cancelItem(item2.id);
+
+  await new Promise((r) => setTimeout(r, 80));
+
+  const errTransitions = statusTransitions.filter((t) => t.pkg === 'app.err').map((t) => t.status);
+  assert.deepStrictEqual(errTransitions, ['waiting', 'running', 'failed']);
+
+  const cancelTransitions = statusTransitions.filter((t) => t.pkg === 'app.cancelling').map((t) => t.status);
+  assert.deepStrictEqual(cancelTransitions, ['waiting', 'cancelled']);
+
+  assert.strictEqual(manager.getItem('app.err'), undefined);
+  assert.strictEqual(manager.getItem('app.cancelling'), undefined);
+});
+
