@@ -133,3 +133,12 @@ npm run build
 在執行 `git commit` 前，你必須於背景執行以下自我檢驗：
 1. 執行 `git status` 與 `git diff`，確認 Staged 變更僅包含該任務的最小相關檔案。
 2. 確認此 Commit 具備**可獨立編譯性**與**可安全回滾性（Revertible）**。
+3. 確認 Commit Message **嚴格使用正體中文（繁體中文）**撰寫。
+
+### 4. 訊息語言與格式規範（Commit Message Language & Format）
+* **強制使用正體中文：** 所有 Git Commit Message（包含標題與內文說明）**一律強制使用正體中文（繁體中文）**撰寫，嚴禁使用簡體中文或純英文 Commit（Conventional Commits 類型標籤如 `feat:`、`fix:` 可保留英文前綴）。
+* **格式範例：**
+  - `feat: 支援快速 AOT 模式 (僅處理 verify 應用且不加 -f)`
+  - `fix: 修復平板模式卡片標題擠壓與排版過窄問題`
+  - `docs: 完善 AGENTS.md 架構說明、領域知識與開發規範`
+  - `refactor: 抽離 AOT 佇列管理至獨立模組`
