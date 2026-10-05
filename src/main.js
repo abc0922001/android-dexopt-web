@@ -514,37 +514,36 @@ function createAppCardHtml(app) {
   `;
 
   return `
-    <div id="card-${app.packageName.replace(/\./g, '_')}" class="bg-white dark:bg-[#131d2e] border border-slate-200/90 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700/80 rounded-2xl p-4 shadow-sm transition-all flex flex-col justify-between gap-3">
-      <div class="flex items-start justify-between gap-3">
-        <div class="flex items-start gap-3 min-w-0 flex-1">
-          <div class="shrink-0 mt-0.5">
-            ${getAppIcon(app.packageName)}
-          </div>
-          <div class="min-w-0 flex-1">
-            <h3 class="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words" title="${app.displayName}">
-              ${app.displayName}
-            </h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400 font-mono break-all mt-0.5" title="${app.packageName}">
-              ${app.packageName}
-            </p>
-          </div>
+    <div id="card-${app.packageName.replace(/\./g, '_')}" class="app-card bg-white dark:bg-[#131d2e] border border-slate-200/90 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700/80 rounded-2xl p-4 shadow-sm transition-all">
+      <div class="app-card-info flex items-start gap-3 min-w-0">
+        <div class="shrink-0 mt-0.5">
+          ${getAppIcon(app.packageName)}
         </div>
-        <div class="flex items-center gap-1.5 shrink-0">
-          <button
-            data-package="${app.packageName}"
-            data-name="${app.displayName}"
-            aria-label="強制停止 ${app.displayName} (Force Stop)"
-            title="強制停止應用程式 (am force-stop)"
-            class="btn-force-stop-app min-h-[38px] w-[38px] rounded-xl text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700/80 transition-all cursor-pointer flex items-center justify-center active:scale-95 shrink-0"
-          >
-            ${ICONS.stop}
-          </button>
-          ${actionButton}
+        <div class="min-w-0 flex-1">
+          <h3 class="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words" title="${app.displayName}">
+            ${app.displayName}
+          </h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 font-mono break-all mt-0.5" title="${app.packageName}">
+            ${app.packageName}
+          </p>
         </div>
       </div>
 
+      <div class="app-card-actions flex items-center gap-1.5 shrink-0">
+        <button
+          data-package="${app.packageName}"
+          data-name="${app.displayName}"
+          aria-label="強制停止 ${app.displayName} (Force Stop)"
+          title="強制停止應用程式 (am force-stop)"
+          class="btn-force-stop-app min-h-[38px] w-[38px] rounded-xl text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700/80 transition-all cursor-pointer flex items-center justify-center active:scale-95 shrink-0"
+        >
+          ${ICONS.stop}
+        </button>
+        ${actionButton}
+      </div>
+
       <!-- Badges Row with high contrast & type identifier -->
-      <div class="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100 dark:border-slate-800/50">
+      <div class="app-card-badges flex items-center gap-2 flex-wrap pt-2 border-t border-slate-100 dark:border-slate-800/50">
         ${typeBadge}
         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${statusBadgeClass}">
           [status=${app.status}]
