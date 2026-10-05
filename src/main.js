@@ -1,6 +1,7 @@
 import { AdbController } from './adb-controller.js';
 import { getAppIcon, ICONS } from './icons.js';
 import { sortApps } from './parser.js';
+import { AotQueueManager } from './queue-manager.js';
 
 // Application State
 const state = {
@@ -29,6 +30,8 @@ const el = {
   html: document.documentElement,
   themeToggle: document.getElementById('btnThemeToggle'),
   themeIcon: document.getElementById('themeIcon'),
+  btnOpenQueueModal: document.getElementById('btnOpenQueueModal'),
+  queueBadge: document.getElementById('queueBadge'),
   toggleLog: document.getElementById('btnToggleLog'),
   logActiveDot: document.getElementById('logActiveDot'),
   logDrawer: document.getElementById('logDrawer'),
@@ -90,6 +93,21 @@ const el = {
   fastAotResultList: document.getElementById('fastAotResultList'),
   btnCloseFastAotResultModal: document.getElementById('btnCloseFastAotResultModal'),
 
+  queueFloatingBanner: document.getElementById('queueFloatingBanner'),
+  queueFloatingText: document.getElementById('queueFloatingText'),
+  btnViewQueueFromBanner: document.getElementById('btnViewQueueFromBanner'),
+  queueStatusModal: document.getElementById('queueStatusModal'),
+  btnCloseQueueModal: document.getElementById('btnCloseQueueModal'),
+  btnCloseQueueModalHeader: document.getElementById('btnCloseQueueModalHeader'),
+  queueStatRunning: document.getElementById('queueStatRunning'),
+  queueStatWaiting: document.getElementById('queueStatWaiting'),
+  queueStatCompleted: document.getElementById('queueStatCompleted'),
+  queueStatFailed: document.getElementById('queueStatFailed'),
+  btnCancelAllPendingQueue: document.getElementById('btnCancelAllPendingQueue'),
+  btnClearFinishedQueue: document.getElementById('btnClearFinishedQueue'),
+  queueTableBody: document.getElementById('queueTableBody'),
+  queueEmptyState: document.getElementById('queueEmptyState'),
+
   modeSpeed: document.getElementById('modeSpeed'),
   modeSpeedProfile: document.getElementById('modeSpeedProfile'),
   modeHintText: document.getElementById('modeHintText'),
@@ -139,7 +157,51 @@ const adbController = new AdbController({
   onStatusChange: (status) => handleConnectionChange(status),
   onDeviceDisconnected: () => {
     showToast('裝置已中斷', 'USB 裝置連線已斷開。', 'warning');
+    queueManager.cancelAllPending();
     renderDisconnectedState();
+  },
+});
+
+// Initialize AOT Task Queue Manager
+const queueManager = new AotQueueManager({
+  onProcessItem: async (item) => {
+    const cardBtn = document.querySelector(`[data-package="${item.packageName}"]`);
+    if (cardBtn) {
+      cardBtn.disabled = true;
+      cardBtn.innerHTML = `${ICONS.spinner} <span class="truncate">編譯中...</span>`;
+    }
+
+    appendTerminalLog(`\n[AOT 佇列] 正在編譯 [${item.displayName}] (${item.packageName})，模式: ${item.mode}...\n`);
+    const updated = await adbController.compileApp(item.packageName, item.mode, {
+      onOutput: (chunk) => appendTerminalLog(chunk),
+    });
+
+    const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
+    const app = allApps.find((a) => a.packageName === item.packageName);
+    if (app) {
+      app.status = updated.status;
+      app.reason = updated.reason;
+      if (item.mode === 'speed-profile' && updated.status === 'verify') {
+        app.overrideMode = 'speed';
+        showToast(
+          'Profile 未就緒，已切換按鈕',
+          `[${app.displayName}] 暫退回 verify，已為此 App 切換為 Optimize (speed)。`,
+          'warning'
+        );
+      } else if (item.mode === 'speed' && updated.status === 'speed') {
+        delete app.overrideMode;
+        showToast('最佳化成功', `已將 [${app.displayName}] 編譯為 ${updated.status}。`, 'info');
+      } else {
+        showToast('最佳化完成', `[${app.displayName}] 編譯結果: ${updated.status}。`, 'info');
+      }
+      updateAppCardInDom(app);
+      updatePillCounts();
+    }
+
+    return updated;
+  },
+  onQueueChange: (items) => {
+    updateQueueUi(items);
   },
 });
 
@@ -515,29 +577,58 @@ function createAppCardHtml(app) {
     ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-300 dark:border-slate-700" title="系統內建應用程式">系統內建</span>`
     : `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200 dark:border-sky-800" title="用戶自己安裝的應用程式">用戶安裝</span>`;
 
-  const actionButton = isAotSupported ? `
-    <button
-      data-package="${app.packageName}"
-      data-mode="${appMode}"
-      aria-label="最佳化 ${app.displayName} (使用 ${appMode} 模式)"
-      class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold ${
-        isSpeedOverride
-          ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
-          : 'bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-sm'
-      } transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 shrink-0"
-    >
-      ${ICONS.zap}
-      <span class="truncate">Optimize (${appMode})</span>
-    </button>
-  ` : `
-    <button
-      disabled
-      aria-label="${app.displayName} 不支援 AOT 編譯"
-      class="min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 cursor-not-allowed shrink-0 flex items-center justify-center"
-    >
-      不支援 AOT
-    </button>
-  `;
+  const queueItem = queueManager.getItem(app.packageName);
+  let actionButton = '';
+
+  if (!isAotSupported) {
+    actionButton = `
+      <button
+        disabled
+        aria-label="${app.displayName} 不支援 AOT 編譯"
+        class="min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 cursor-not-allowed shrink-0 flex items-center justify-center"
+      >
+        不支援 AOT
+      </button>
+    `;
+  } else if (queueItem?.status === 'running') {
+    actionButton = `
+      <button
+        disabled
+        aria-label="${app.displayName} 正在 AOT 編譯中"
+        class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 cursor-not-allowed shrink-0 flex items-center justify-center gap-1.5"
+      >
+        ${ICONS.spinner}
+        <span class="truncate">編譯中...</span>
+      </button>
+    `;
+  } else if (queueItem?.status === 'waiting') {
+    actionButton = `
+      <button
+        disabled
+        aria-label="${app.displayName} 已排入 AOT 佇列等待中"
+        class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 cursor-not-allowed shrink-0 flex items-center justify-center gap-1.5"
+      >
+        <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 7v5l3 3"/></svg>
+        <span class="truncate">佇列等待中...</span>
+      </button>
+    `;
+  } else {
+    actionButton = `
+      <button
+        data-package="${app.packageName}"
+        data-mode="${appMode}"
+        aria-label="最佳化 ${app.displayName} (使用 ${appMode} 模式)"
+        class="btn-optimize-app min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-semibold ${
+          isSpeedOverride
+            ? 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
+            : 'bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-sm'
+        } transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 shrink-0"
+      >
+        ${ICONS.zap}
+        <span class="truncate">Optimize (${appMode})</span>
+      </button>
+    `;
+  }
 
   return `
     <div id="card-${app.packageName.replace(/\./g, '_')}" class="app-card bg-white dark:bg-[#131d2e] border border-slate-200/90 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700/80 rounded-2xl p-4 shadow-sm transition-all flex flex-col justify-between gap-3">
@@ -620,51 +711,29 @@ function updateAppCardInDom(app) {
   });
 }
 
-/* ---------------- Single App Optimization ---------------- */
+/* ---------------- Single App Optimization via Queue ---------------- */
 
 async function handleOptimizeApp(packageName, buttonEl) {
-  const origHtml = buttonEl.innerHTML;
-  buttonEl.disabled = true;
-  buttonEl.innerHTML = `${ICONS.spinner} <span>編譯中...</span>`;
-
   const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
   const app = allApps.find((a) => a.packageName === packageName);
-  const targetMode = buttonEl.dataset.mode || app?.overrideMode || state.dexoptMode;
+  if (!app) return;
 
-  try {
-    const updated = await adbController.compileApp(packageName, targetMode, {
-      onOutput: (chunk) => appendTerminalLog(chunk),
-    });
+  const targetMode = buttonEl?.dataset?.mode || app.overrideMode || state.dexoptMode;
+  const res = queueManager.enqueue(app, targetMode);
 
-    if (app) {
-      app.status = updated.status;
-      app.reason = updated.reason;
+  if (!res.success && res.reason === 'already_queued') {
+    showToast('已在佇列中', `[${app.displayName}] 已經在 AOT 執行佇列中等待或執行。`, 'info');
+    return;
+  }
 
-      // If compiled with speed-profile but fell back to verify, switch only this app's button to speed!
-      if (targetMode === 'speed-profile' && updated.status === 'verify') {
-        app.overrideMode = 'speed';
-      } else if (targetMode === 'speed' && updated.status === 'speed') {
-        delete app.overrideMode;
-      }
+  updateAppCardInDom(app);
 
-      updateAppCardInDom(app);
-    } else {
-      renderAppGrids();
-    }
-
-    if (targetMode === 'speed-profile' && updated.status === 'verify') {
-      showToast(
-        'Profile 未就緒，已切換按鈕',
-        `[${app?.displayName || packageName}] 暫退回 verify，已為此 App 切換為 Optimize (speed)，再次點擊即可強制完整編譯！`,
-        'warning'
-      );
-    } else {
-      showToast('最佳化成功', `已將 [${app?.displayName || packageName}] 編譯為 ${updated.status}。`, 'info');
-    }
-  } catch (err) {
-    showToast('最佳化失敗', err.message, 'error');
-    buttonEl.disabled = false;
-    buttonEl.innerHTML = origHtml;
+  if (queueManager.waitingCount > 0) {
+    showToast(
+      '已加入 AOT 佇列',
+      `[${app.displayName}] 已排入 AOT 佇列 (目前佇列共 ${queueManager.pendingCount} 個任務)。`,
+      'info'
+    );
   }
 }
 
@@ -672,6 +741,10 @@ async function handleOptimizeApp(packageName, buttonEl) {
 
 function openBatchModal(targetMode) {
   if (state.isBatchRunning || state.isBgDexoptRunning) return;
+  if (queueManager.pendingCount > 0) {
+    showToast('單一佇列進行中', '目前尚有單一 App AOT 佇列正在執行中，請等待完成後再啟動批次任務。', 'warning');
+    return;
+  }
   state.batchTargetMode = targetMode;
 
   if (el.batchModalTargetMode) {
@@ -857,6 +930,10 @@ function getVerifyApps() {
 
 function openFastAotModal() {
   if (state.isBatchRunning || state.isBgDexoptRunning) return;
+  if (queueManager.pendingCount > 0) {
+    showToast('單一佇列進行中', '目前尚有單一 App AOT 佇列正在執行中，請等待完成後再啟動快速 AOT。', 'warning');
+    return;
+  }
 
   const candidates = getVerifyApps();
   if (candidates.length === 0) {
@@ -1171,6 +1248,153 @@ el.btnCancelBgDexopt.addEventListener('click', async () => {
   } catch (err) {
     showToast('中斷失敗', err.message, 'error');
   }
+});
+
+/* ---------------- AOT Queue Management UI ---------------- */
+
+function updateQueueUi(items = queueManager.items) {
+  const activeCount = queueManager.activeCount;
+  const waitingCount = queueManager.waitingCount;
+  const pendingCount = queueManager.pendingCount;
+
+  // Header badge
+  if (el.queueBadge) {
+    el.queueBadge.textContent = `${pendingCount}`;
+    if (pendingCount > 0) {
+      el.queueBadge.classList.remove('hidden');
+    } else {
+      el.queueBadge.classList.add('hidden');
+    }
+  }
+
+  // Floating banner
+  if (el.queueFloatingBanner) {
+    if (pendingCount > 0) {
+      el.queueFloatingBanner.classList.remove('hidden');
+      if (el.queueFloatingText) {
+        const runningItem = items.find((i) => i.status === 'running');
+        const runningText = runningItem ? `正在編譯 [${runningItem.displayName}]` : `${activeCount} 個執行中`;
+        el.queueFloatingText.textContent = `AOT 佇列：${runningText}${waitingCount > 0 ? `，${waitingCount} 個等待中` : ''}`;
+      }
+    } else {
+      el.queueFloatingBanner.classList.add('hidden');
+    }
+  }
+
+  // Modal Counter Grid
+  if (el.queueStatRunning) el.queueStatRunning.textContent = `${activeCount}`;
+  if (el.queueStatWaiting) el.queueStatWaiting.textContent = `${waitingCount}`;
+  if (el.queueStatCompleted) el.queueStatCompleted.textContent = `${items.filter((i) => i.status === 'completed').length}`;
+  if (el.queueStatFailed) el.queueStatFailed.textContent = `${items.filter((i) => i.status === 'failed' || i.status === 'cancelled').length}`;
+
+  // Disable "Cancel All Pending" if 0 waiting
+  if (el.btnCancelAllPendingQueue) {
+    el.btnCancelAllPendingQueue.disabled = waitingCount === 0;
+  }
+
+  // Render Table
+  if (el.queueTableBody) {
+    if (items.length === 0) {
+      el.queueTableBody.innerHTML = '';
+      el.queueEmptyState?.classList.remove('hidden');
+    } else {
+      el.queueEmptyState?.classList.add('hidden');
+      el.queueTableBody.innerHTML = items
+        .map((item) => {
+          let statusBadge = '';
+          if (item.status === 'running') {
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 font-mono"><span class="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse"></span>執行中</span>`;
+          } else if (item.status === 'waiting') {
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-mono">⏳ 等待中</span>`;
+          } else if (item.status === 'completed') {
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-mono">✅ 已完成</span>`;
+          } else if (item.status === 'cancelled') {
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 font-mono">已取消</span>`;
+          } else {
+            statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-mono" title="${escapeHtml(item.error || '')}">❌ 失敗</span>`;
+          }
+
+          let actionCell = '';
+          if (item.status === 'waiting') {
+            actionCell = `
+              <button
+                data-cancel-queue-id="${item.id}"
+                data-cancel-pkg="${item.packageName}"
+                class="btn-cancel-queue-item px-2 py-1 rounded text-[11px] text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+            `;
+          } else if (item.status === 'failed' && item.error) {
+            actionCell = `<span class="text-[10px] text-rose-400 font-mono truncate max-w-[120px] inline-block" title="${escapeHtml(item.error)}">${escapeHtml(item.error)}</span>`;
+          } else {
+            actionCell = `<span class="text-slate-400 text-[10px]">-</span>`;
+          }
+
+          return `
+            <tr class="hover:bg-slate-100/50 dark:hover:bg-slate-800/40 transition-colors">
+              <td class="py-2.5 px-3 whitespace-nowrap">${statusBadge}</td>
+              <td class="py-2.5 px-3 min-w-0">
+                <div class="font-medium text-slate-900 dark:text-slate-100 truncate">${escapeHtml(item.displayName)}</div>
+                <div class="text-[10px] text-slate-400 font-mono truncate">${escapeHtml(item.packageName)}</div>
+              </td>
+              <td class="py-2.5 px-3 whitespace-nowrap">
+                <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 font-mono text-slate-700 dark:text-slate-300">${item.mode}</span>
+              </td>
+              <td class="py-2.5 px-3 whitespace-nowrap text-slate-500 dark:text-slate-400 font-mono text-[11px]">
+                ${item.duration || (item.status === 'running' ? '<span class="text-cyan-500">計算中...</span>' : '-')}
+              </td>
+              <td class="py-2.5 px-3 whitespace-nowrap text-right">
+                ${actionCell}
+              </td>
+            </tr>
+          `;
+        })
+        .join('');
+
+      // Bind cancel buttons
+      el.queueTableBody.querySelectorAll('.btn-cancel-queue-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = parseInt(btn.dataset.cancelQueueId, 10);
+          const pkg = btn.dataset.cancelPkg;
+          queueManager.cancelItem(id);
+          const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
+          const app = allApps.find((a) => a.packageName === pkg);
+          if (app) updateAppCardInDom(app);
+          showToast('已取消佇列', `[${app?.displayName || pkg}] 已從 AOT 佇列中取消。`, 'warning');
+        });
+      });
+    }
+  }
+}
+
+function openQueueModal() {
+  updateQueueUi();
+  el.queueStatusModal?.classList.remove('hidden');
+}
+
+function closeQueueModal() {
+  el.queueStatusModal?.classList.add('hidden');
+}
+
+/* ---------------- AOT Queue Listeners ---------------- */
+
+el.btnOpenQueueModal?.addEventListener('click', openQueueModal);
+el.btnViewQueueFromBanner?.addEventListener('click', openQueueModal);
+el.btnCloseQueueModal?.addEventListener('click', closeQueueModal);
+el.btnCloseQueueModalHeader?.addEventListener('click', closeQueueModal);
+
+el.btnCancelAllPendingQueue?.addEventListener('click', () => {
+  const count = queueManager.cancelAllPending();
+  if (count > 0) {
+    showToast('已取消等待任務', `已取消佇列中 ${count} 個等待中的 AOT 任務。`, 'warning');
+    renderAppGrids();
+  }
+});
+
+el.btnClearFinishedQueue?.addEventListener('click', () => {
+  queueManager.clearFinished();
+  showToast('已清除紀錄', '已清空已完成與已取消的歷史任務紀錄。', 'info');
 });
 
 /* ---------------- Fast AOT Listeners ---------------- */

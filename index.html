@@ -50,6 +50,13 @@
           <span id="themeIcon"></span>
         </button>
 
+        <!-- AOT Queue Status Button -->
+        <button id="btnOpenQueueModal" aria-label="查看 AOT 執行佇列狀態表" title="查看目前 AOT 佇列執行進度與等待清單" class="px-3 py-2 min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer relative flex items-center gap-1.5 text-xs font-semibold">
+          <svg class="w-4 h-4 text-cyan-500 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/><path stroke-linecap="round" stroke-linejoin="round" d="M8 6v12"/></svg>
+          <span class="hidden sm:inline">AOT 佇列</span>
+          <span id="queueBadge" class="hidden px-1.5 py-0.2 rounded-full text-[10px] bg-cyan-500 text-slate-950 font-mono font-bold">0</span>
+        </button>
+
         <!-- Log Drawer Toggle -->
         <button id="btnToggleLog" aria-label="切換終端日誌 (Toggle terminal log drawer)" title="切換日誌抽屜" class="w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer relative flex items-center justify-center">
           <svg class="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -597,6 +604,108 @@
       <div class="flex items-center justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
         <button id="btnCloseFastAotResultModal" class="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-md shadow-cyan-500/20 transition-all cursor-pointer active:scale-95">
           <span>完成</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Queue Banner -->
+  <div id="queueFloatingBanner" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/90 dark:bg-[#0f172a]/95 border border-cyan-500/40 text-white px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-md flex items-center gap-3.5 text-xs animate-in fade-in slide-in-from-bottom-3 duration-200">
+    <div class="flex items-center gap-2">
+      <span class="relative flex h-2.5 w-2.5">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
+      </span>
+      <span id="queueFloatingText" class="font-medium text-slate-100">AOT 佇列執行中...</span>
+    </div>
+    <button id="btnViewQueueFromBanner" class="px-2.5 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition-colors cursor-pointer text-[11px] shadow-sm active:scale-95">
+      查看狀態表
+    </button>
+  </div>
+
+  <!-- Queue Status Table Modal -->
+  <div id="queueStatusModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="queueModalTitle">
+    <div class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+      <!-- Modal Header -->
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-500 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/><path stroke-linecap="round" stroke-linejoin="round" d="M8 6v12"/></svg>
+          </div>
+          <div>
+            <h3 id="queueModalTitle" class="text-base font-bold text-slate-900 dark:text-white">
+              AOT 執行佇列狀態表
+            </h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              連續點擊的多個 App 將依序於背景安全編譯，避免 WebUSB 傳輸衝突
+            </p>
+          </div>
+        </div>
+        <button id="btnCloseQueueModalHeader" aria-label="關閉佇列視窗" class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center justify-center cursor-pointer">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Live Counters Grid -->
+      <div class="grid grid-cols-4 gap-2 text-center text-xs">
+        <div class="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/25">
+          <span class="text-[10px] text-cyan-600 dark:text-cyan-400 block font-medium">🟢 執行中</span>
+          <span id="queueStatRunning" class="text-sm font-bold text-cyan-700 dark:text-cyan-300 font-mono">0</span>
+        </div>
+        <div class="p-2 rounded-xl bg-amber-500/10 border border-amber-500/25">
+          <span class="text-[10px] text-amber-600 dark:text-amber-400 block font-medium">⏳ 等待中</span>
+          <span id="queueStatWaiting" class="text-sm font-bold text-amber-700 dark:text-amber-300 font-mono">0</span>
+        </div>
+        <div class="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/25">
+          <span class="text-[10px] text-emerald-600 dark:text-emerald-400 block font-medium">✅ 已完成</span>
+          <span id="queueStatCompleted" class="text-sm font-bold text-emerald-700 dark:text-emerald-300 font-mono">0</span>
+        </div>
+        <div class="p-2 rounded-xl bg-rose-500/10 border border-rose-500/25">
+          <span class="text-[10px] text-rose-600 dark:text-rose-400 block font-medium">❌ 失敗/中斷</span>
+          <span id="queueStatFailed" class="text-sm font-bold text-rose-700 dark:text-rose-300 font-mono">0</span>
+        </div>
+      </div>
+
+      <!-- Quick Actions Toolbar -->
+      <div class="flex items-center justify-between text-xs pt-1">
+        <span class="font-semibold text-slate-700 dark:text-slate-300">佇列項目列表：</span>
+        <div class="flex items-center gap-2">
+          <button id="btnCancelAllPendingQueue" class="px-2.5 py-1 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+            取消所有等待中
+          </button>
+          <button id="btnClearFinishedQueue" class="px-2.5 py-1 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium transition-colors cursor-pointer">
+            清除已完成記錄
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable Queue Status Table -->
+      <div class="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900/40">
+        <div class="max-h-60 overflow-y-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead class="sticky top-0 bg-slate-100 dark:bg-slate-800/90 backdrop-blur-xs border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 uppercase font-semibold">
+              <tr>
+                <th class="py-2 px-3">狀態</th>
+                <th class="py-2 px-3">應用程式</th>
+                <th class="py-2 px-3">模式</th>
+                <th class="py-2 px-3">耗時</th>
+                <th class="py-2 px-3 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="queueTableBody" class="divide-y divide-slate-100 dark:divide-slate-800 font-sans">
+              <!-- Dynamically populated rows -->
+            </tbody>
+          </table>
+          <div id="queueEmptyState" class="hidden py-8 text-center text-slate-400 text-xs">
+            目前佇列中沒有任務。點擊任何 App 卡片上的 Optimize 按鈕即可加入佇列！
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Action Buttons -->
+      <div class="flex items-center justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button id="btnCloseQueueModal" class="px-5 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
+          關閉
         </button>
       </div>
     </div>
