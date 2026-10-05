@@ -143,6 +143,7 @@ const el = {
   labelCannotAotCount: document.getElementById('labelCannotAotCount'),
   emptySearchNotice: document.getElementById('emptySearchNotice'),
   emptySearchQuery: document.getElementById('emptySearchQuery'),
+  offlineIndicatorBadge: document.getElementById('offlineIndicatorBadge'),
 
   toast: document.getElementById('toast'),
   toastIcon: document.getElementById('toastIcon'),
@@ -1464,8 +1465,57 @@ el.btnReapplySort?.addEventListener('click', () => {
   showToast('已重新排序', `已依「${selectedText}」重新排列所有卡片。`, 'info');
 });
 
+/* ---------------- Offline Support & Service Worker (Issue #1) ---------------- */
+
+function initOfflineSupport() {
+  function updateOnlineStatus() {
+    const isOnline = navigator.onLine;
+    if (el.offlineIndicatorBadge) {
+      if (!isOnline) {
+        el.offlineIndicatorBadge.classList.remove('hidden');
+      } else {
+        el.offlineIndicatorBadge.classList.add('hidden');
+      }
+    }
+  }
+
+  window.addEventListener('online', () => {
+    updateOnlineStatus();
+    showToast('網路已連線', '已偵測到網際網路連線。', 'info');
+  });
+
+  window.addEventListener('offline', () => {
+    updateOnlineStatus();
+    showToast('已進入離線模式', '目前無網際網路連線，WebUSB 本機傳輸運作正常。', 'warning');
+  });
+
+  updateOnlineStatus();
+
+  // Register Service Worker for offline PWA operation
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('./sw.js')
+        .then((reg) => {
+          reg.addEventListener('updatefound', () => {
+            const installing = reg.installing;
+            installing?.addEventListener('statechange', () => {
+              if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('[SW] New version available, cached for offline use.');
+              }
+            });
+          });
+        })
+        .catch((err) => {
+          console.warn('[SW] Registration failed:', err);
+        });
+    });
+  }
+}
+
 /* ---------------- Initial Boot ---------------- */
 applyTheme(state.theme);
 setDexoptMode(state.dexoptMode);
 renderDisconnectedState();
+initOfflineSupport();
 

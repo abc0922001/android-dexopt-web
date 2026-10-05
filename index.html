@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Android Dexopt Studio Web - WebADB ART 效能最佳化工具</title>
   <meta name="description" content="純前端 WebADB Android ART Dexopt 效能最佳化管理工具，支援 WebUSB、bg-dexopt-job 與單一 App AOT 編譯。" />
+  <meta name="theme-color" content="#06b6d4" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Dexopt Web" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2306b6d4'><path d='M13 10V3L4 14h7v7l9-11h-7z'/></svg>" />
   <link rel="stylesheet" href="./src/style.css" />
 </head>
@@ -33,6 +40,12 @@
 
       <!-- Right Header Actions (Connection Status & Theme Switcher) -->
       <div class="flex items-center gap-2.5 sm:gap-3 flex-wrap">
+        <!-- Offline Indicator Badge (Issue #1) -->
+        <span id="offlineIndicatorBadge" class="hidden px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 flex items-center gap-1.5" title="目前無網際網路連線，WebUSB 本機傳輸運作正常">
+          <svg class="w-3.5 h-3.5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829M1.414 1.414l21.172 21.172M6.343 6.343a9 9 0 000 12.728M8.464 8.464a5 5 0 000 7.072"/></svg>
+          <span class="hidden sm:inline">離線運作中</span>
+        </span>
+
         <!-- Connection Badge / Button -->
         <div id="connectionContainer" class="flex items-center gap-2">
           <!-- Populated by JS -->
