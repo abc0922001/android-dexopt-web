@@ -385,16 +385,22 @@ export class AdbController {
    * @param {'speed'|'speed-profile'} mode
    * @param {object} options
    * @param {boolean} [options.skipQueryStatus=false] - When true, skips dumpsys package re-query (for batch processing)
+   * @param {boolean} [options.force=true] - When true, adds -f flag to force compilation; when false, compiles without -f (fast mode)
    */
-  async compileApp(packageName, mode = 'speed', { onOutput, skipQueryStatus = false } = {}) {
-    this.log('最佳化', `正在編譯 [${packageName}]，模式: ${mode}...`);
+  async compileApp(packageName, mode = 'speed', { onOutput, skipQueryStatus = false, force = true } = {}) {
+    this.log('最佳化', `正在編譯 [${packageName}]，模式: ${mode}${force ? ' (強制 -f)' : ' (快速/無 -f)'}...`);
     
     if (this.isDemoMode) {
-      return this._mockCompileApp(packageName, mode, { onOutput });
+      return this._mockCompileApp(packageName, mode, { onOutput, force });
     }
 
-    // cmd package compile -m <mode> -f <package>
-    const compileCmd = ['cmd', 'package', 'compile', '-m', mode, '-f', packageName];
+    // cmd package compile -m <mode> [-f] <package>
+    const compileCmd = ['cmd', 'package', 'compile', '-m', mode];
+    if (force) {
+      compileCmd.push('-f');
+    }
+    compileCmd.push(packageName);
+
     const compileRes = await this.exec(compileCmd, { onOutput });
 
     if (skipQueryStatus) {
@@ -463,9 +469,9 @@ export class AdbController {
     }
   }
 
-  async _mockCompileApp(packageName, mode, { onOutput }) {
-    await new Promise((r) => setTimeout(r, 1200));
-    const output = `Compiling ${packageName} with mode=${mode} ...\nSuccess\n`;
+  async _mockCompileApp(packageName, mode, { onOutput, force = true } = {}) {
+    await new Promise((r) => setTimeout(r, 600));
+    const output = `Compiling ${packageName} with mode=${mode}${force ? ' -f' : ''} ...\nSuccess\n`;
     onOutput?.(output, false);
     return {
       status: mode,

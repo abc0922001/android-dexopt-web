@@ -46,6 +46,8 @@ const el = {
   btnTriggerBgDexopt: document.getElementById('btnTriggerBgDexopt'),
   btnCancelBgDexopt: document.getElementById('btnCancelBgDexopt'),
   bgDexoptBtnText: document.getElementById('bgDexoptBtnText'),
+  btnFastAot: document.getElementById('btnFastAot'),
+  fastAotVerifyBadge: document.getElementById('fastAotVerifyBadge'),
   btnBatchSpeedProfile: document.getElementById('btnBatchSpeedProfile'),
   btnBatchSpeed: document.getElementById('btnBatchSpeed'),
   btnBatchForceStop: document.getElementById('btnBatchForceStop'),
@@ -73,6 +75,20 @@ const el = {
   forceStopScopeContainer: document.getElementById('forceStopScopeContainer'),
   btnCancelForceStopModal: document.getElementById('btnCancelForceStopModal'),
   btnConfirmForceStopModal: document.getElementById('btnConfirmForceStopModal'),
+
+  fastAotConfirmModal: document.getElementById('fastAotConfirmModal'),
+  fastAotCandidateCount: document.getElementById('fastAotCandidateCount'),
+  fastAotPreviewList: document.getElementById('fastAotPreviewList'),
+  btnCancelFastAotModal: document.getElementById('btnCancelFastAotModal'),
+  btnConfirmFastAotModal: document.getElementById('btnConfirmFastAotModal'),
+
+  fastAotResultModal: document.getElementById('fastAotResultModal'),
+  fastAotMetricTotal: document.getElementById('fastAotMetricTotal'),
+  fastAotMetricSuccess: document.getElementById('fastAotMetricSuccess'),
+  fastAotMetricFailed: document.getElementById('fastAotMetricFailed'),
+  fastAotMetricDuration: document.getElementById('fastAotMetricDuration'),
+  fastAotResultList: document.getElementById('fastAotResultList'),
+  btnCloseFastAotResultModal: document.getElementById('btnCloseFastAotResultModal'),
 
   modeSpeed: document.getElementById('modeSpeed'),
   modeSpeedProfile: document.getElementById('modeSpeedProfile'),
@@ -397,6 +413,16 @@ function updatePillCounts() {
   if (el.batchScopeUserCount) el.batchScopeUserCount.textContent = `${userCount} 個`;
   if (el.batchScopeAllCount) el.batchScopeAllCount.textContent = `${userCount + systemCount} 個`;
   if (el.batchScopeSystemCount) el.batchScopeSystemCount.textContent = `${systemCount} 個`;
+
+  const verifyCount = allApps.filter((a) => !a.isCannotAot && (a.status || '').toLowerCase() === 'verify').length;
+  if (el.fastAotVerifyBadge) {
+    el.fastAotVerifyBadge.textContent = `${verifyCount}`;
+    if (verifyCount > 0) {
+      el.fastAotVerifyBadge.classList.remove('hidden');
+    } else {
+      el.fastAotVerifyBadge.classList.add('hidden');
+    }
+  }
 }
 
 function renderAppGrids() {
@@ -690,6 +716,7 @@ async function handleStartBatch() {
 
   // UI state updates
   el.batchProgressBarContainer?.classList.remove('hidden');
+  el.btnFastAot?.setAttribute('disabled', 'true');
   el.btnBatchSpeed?.setAttribute('disabled', 'true');
   el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
   el.btnTriggerBgDexopt?.setAttribute('disabled', 'true');
@@ -751,6 +778,7 @@ async function handleStartBatch() {
   await refreshAppStatuses(targetMode);
 
   state.isBatchRunning = false;
+  el.btnFastAot?.removeAttribute('disabled');
   el.btnBatchSpeed?.removeAttribute('disabled');
   el.btnBatchSpeedProfile?.removeAttribute('disabled');
   el.btnTriggerBgDexopt?.removeAttribute('disabled');
@@ -808,6 +836,209 @@ function handleCancelBatch() {
   if (el.batchProgressCurrentApp) {
     el.batchProgressCurrentApp.textContent = '正在中斷任務，請稍候目前 App 完成...';
   }
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/* ---------------- Fast AOT Mode (Issue #3) ---------------- */
+
+function getVerifyApps() {
+  const allApps = [...state.apps.frequentlyUsed, ...state.apps.general];
+  return allApps.filter((a) => !a.isCannotAot && (a.status || '').toLowerCase() === 'verify');
+}
+
+function openFastAotModal() {
+  if (state.isBatchRunning || state.isBgDexoptRunning) return;
+
+  const candidates = getVerifyApps();
+  if (candidates.length === 0) {
+    showToast('無需最佳化', '目前所有支援的應用程式皆已完成編譯，沒有 status=verify 的待處理項目！', 'info');
+    return;
+  }
+
+  if (el.fastAotCandidateCount) {
+    el.fastAotCandidateCount.textContent = `${candidates.length} 個`;
+  }
+
+  if (el.fastAotPreviewList) {
+    el.fastAotPreviewList.innerHTML = candidates
+      .map(
+        (app) => `
+        <div class="flex items-center justify-between py-1 border-b border-slate-200/50 dark:border-slate-800/50 last:border-0">
+          <div class="min-w-0 pr-2">
+            <span class="font-medium text-slate-800 dark:text-slate-200 truncate block">${escapeHtml(app.displayName)}</span>
+            <span class="text-[10px] text-slate-500 font-mono truncate block">${escapeHtml(app.packageName)}</span>
+          </div>
+          <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono shrink-0">verify</span>
+        </div>
+      `
+      )
+      .join('');
+  }
+
+  el.fastAotConfirmModal?.classList.remove('hidden');
+}
+
+function closeFastAotModal() {
+  el.fastAotConfirmModal?.classList.add('hidden');
+}
+
+async function handleStartFastAot() {
+  closeFastAotModal();
+  if (state.isBatchRunning) return;
+
+  const candidates = getVerifyApps();
+  if (candidates.length === 0) {
+    showToast('無法執行', '沒有找到 status=verify 的應用程式。', 'warning');
+    return;
+  }
+
+  state.isBatchRunning = true;
+  setLogDrawer(true);
+
+  // UI state updates
+  el.batchProgressBarContainer?.classList.remove('hidden');
+  if (el.batchProgressTitle) el.batchProgressTitle.textContent = '快速 AOT 最佳化進行中 (僅 verify / 無 -f)';
+  el.btnFastAot?.setAttribute('disabled', 'true');
+  el.btnBatchSpeed?.setAttribute('disabled', 'true');
+  el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
+  el.btnTriggerBgDexopt?.setAttribute('disabled', 'true');
+  el.btnCancelBatch?.classList.remove('hidden');
+
+  let successCount = 0;
+  let failedCount = 0;
+  const startTime = Date.now();
+  const results = [];
+
+  appendTerminalLog(`\n========== 開始快速 AOT 模式 (目標: status=verify, 模式: speed, 無 -f 旗標, 總數: ${candidates.length}) ==========\n`);
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (!state.isBatchRunning) {
+      appendTerminalLog(`\n⚠️ 快速 AOT 編譯已由使用者中斷。\n`);
+      showToast('快速 AOT 已中斷', `已執行 ${i}/${candidates.length} 個應用程式。`, 'warning');
+      break;
+    }
+
+    const app = candidates[i];
+    const pct = Math.round(((i + 1) / candidates.length) * 100);
+
+    if (el.batchProgressCount) el.batchProgressCount.textContent = `[${i + 1}/${candidates.length}] (${pct}%)`;
+    if (el.batchProgressBar) el.batchProgressBar.style.width = `${pct}%`;
+    if (el.batchProgressCurrentApp) el.batchProgressCurrentApp.textContent = `正在快速編譯 [${i + 1}/${candidates.length}]: ${app.displayName} (${app.packageName})`;
+
+    const cardBtn = document.querySelector(`[data-package="${app.packageName}"]`);
+    if (cardBtn) {
+      cardBtn.disabled = true;
+      cardBtn.innerHTML = `${ICONS.spinner} <span>快速編譯中...</span>`;
+    }
+
+    const itemStartTime = Date.now();
+    try {
+      const updated = await adbController.compileApp(app.packageName, 'speed', {
+        onOutput: (chunk) => appendTerminalLog(chunk),
+        skipQueryStatus: true,
+        force: false, // Issue #3 requirement: 不加 -f
+      });
+      app.status = updated.status;
+      app.reason = updated.reason;
+      successCount++;
+      const itemDuration = ((Date.now() - itemStartTime) / 1000).toFixed(1);
+      results.push({
+        displayName: app.displayName,
+        packageName: app.packageName,
+        oldStatus: 'verify',
+        newStatus: updated.status,
+        success: true,
+        duration: `${itemDuration}s`,
+      });
+    } catch (err) {
+      failedCount++;
+      appendTerminalLog(`❌ [${app.packageName}] 編譯失敗: ${err.message}\n`);
+      results.push({
+        displayName: app.displayName,
+        packageName: app.packageName,
+        oldStatus: 'verify',
+        newStatus: 'verify',
+        success: false,
+        duration: '-',
+        error: err.message,
+      });
+    } finally {
+      updateAppCardInDom(app);
+    }
+  }
+
+  const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
+  const wasCancelled = !state.isBatchRunning;
+  appendTerminalLog(`\n========== 快速 AOT 模式${wasCancelled ? '已中斷' : '結束'} (成功: ${successCount}, 失敗: ${failedCount}, 總耗時: ${totalDuration}s) ==========\n`);
+
+  // Refresh status of all apps once at the end
+  await refreshAppStatuses('speed');
+
+  state.isBatchRunning = false;
+  el.btnFastAot?.removeAttribute('disabled');
+  el.btnBatchSpeed?.removeAttribute('disabled');
+  el.btnBatchSpeedProfile?.removeAttribute('disabled');
+  el.btnTriggerBgDexopt?.removeAttribute('disabled');
+  el.btnCancelBatch?.classList.add('hidden');
+
+  setTimeout(() => {
+    if (!state.isBatchRunning) {
+      el.batchProgressBarContainer?.classList.add('hidden');
+    }
+  }, 4000);
+
+  // Issue #3 requirement: "完全跑完再顯示執行結果"
+  showFastAotResultModal({
+    total: candidates.length,
+    success: successCount,
+    failed: failedCount,
+    duration: `${totalDuration}s`,
+    results,
+    wasCancelled,
+  });
+}
+
+function showFastAotResultModal({ total, success, failed, duration, results, wasCancelled }) {
+  if (el.fastAotMetricTotal) el.fastAotMetricTotal.textContent = `${total}`;
+  if (el.fastAotMetricSuccess) el.fastAotMetricSuccess.textContent = `${success}`;
+  if (el.fastAotMetricFailed) el.fastAotMetricFailed.textContent = `${failed}`;
+  if (el.fastAotMetricDuration) el.fastAotMetricDuration.textContent = duration;
+
+  if (el.fastAotResultList) {
+    el.fastAotResultList.innerHTML = results
+      .map(
+        (r) => `
+        <div class="flex items-center justify-between p-2 rounded-lg ${r.success ? 'bg-emerald-500/5' : 'bg-rose-500/5'} border border-slate-200/40 dark:border-slate-800/40">
+          <div class="min-w-0 pr-2">
+            <span class="font-medium text-slate-800 dark:text-slate-200 truncate block">${escapeHtml(r.displayName)}</span>
+            <span class="text-[10px] text-slate-400 font-mono truncate block">${escapeHtml(r.packageName)}</span>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono">${r.oldStatus}</span>
+            <span class="text-slate-400 text-xs">➔</span>
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${r.success ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' : 'bg-rose-500/20 text-rose-600 dark:text-rose-300'}">${r.newStatus}</span>
+            <span class="text-[10px] text-slate-400 font-mono">${r.duration}</span>
+          </div>
+        </div>
+      `
+      )
+      .join('');
+  }
+
+  el.fastAotResultModal?.classList.remove('hidden');
+}
+
+function closeFastAotResultModal() {
+  el.fastAotResultModal?.classList.add('hidden');
 }
 
 /* ---------------- Force Stop Actions ---------------- */
@@ -941,6 +1172,13 @@ el.btnCancelBgDexopt.addEventListener('click', async () => {
     showToast('中斷失敗', err.message, 'error');
   }
 });
+
+/* ---------------- Fast AOT Listeners ---------------- */
+
+el.btnFastAot?.addEventListener('click', openFastAotModal);
+el.btnCancelFastAotModal?.addEventListener('click', closeFastAotModal);
+el.btnConfirmFastAotModal?.addEventListener('click', handleStartFastAot);
+el.btnCloseFastAotResultModal?.addEventListener('click', closeFastAotResultModal);
 
 /* ---------------- Batch Compile Listeners ---------------- */
 
