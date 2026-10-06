@@ -347,6 +347,17 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     const foregroundMs = getUsageMs(pkg);
     const isLauncherApp = launcherSet.has(pkg);
 
+    // Determine initial Profile state based on dumpsys state (Issue #5 - 輔助驗證)
+    let initialHasProfile = undefined;
+    let initialOverrideMode = undefined;
+    if (dexopt.status === 'speed-profile') {
+      initialHasProfile = true;
+      initialOverrideMode = 'speed-profile';
+    } else if (dexopt.status === 'verify') {
+      initialHasProfile = false;
+      initialOverrideMode = 'speed';
+    }
+
     const appRecord = {
       packageName: pkg,
       displayName: formatDisplayName(pkg),
@@ -355,6 +366,9 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
       status: isCannotAot && dexopt.status === 'unknown' ? 'N/A' : dexopt.status,
       reason: isCannotAot && dexopt.reason === 'unknown' ? 'no-code' : dexopt.reason,
       hasCode: dexopt.hasCode,
+      hasProfile: initialHasProfile,
+      profileLines: 0,
+      overrideMode: initialOverrideMode,
       isCannotAot,
       isOptimizing: false,
       foregroundMs,

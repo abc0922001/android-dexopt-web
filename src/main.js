@@ -55,6 +55,7 @@ const el = {
   btnBatchSpeedProfile: document.getElementById('btnBatchSpeedProfile'),
   btnBatchSpeed: document.getElementById('btnBatchSpeed'),
   btnBatchForceStop: document.getElementById('btnBatchForceStop'),
+  btnBatchCheckProfile: document.getElementById('btnBatchCheckProfile'),
   btnCancelBatch: document.getElementById('btnCancelBatch'),
 
   batchProgressBarContainer: document.getElementById('batchProgressBarContainer'),
@@ -63,6 +64,13 @@ const el = {
   batchProgressBar: document.getElementById('batchProgressBar'),
   batchProgressCurrentApp: document.getElementById('batchProgressCurrentApp'),
   btnStopBatchProgress: document.getElementById('btnStopBatchProgress'),
+
+  checkProfileConfirmModal: document.getElementById('checkProfileConfirmModal'),
+  checkProfileScopeFrequentlyUsedCount: document.getElementById('checkProfileScopeFrequentlyUsedCount'),
+  checkProfileScopeUserCount: document.getElementById('checkProfileScopeUserCount'),
+  checkProfileScopeAllCount: document.getElementById('checkProfileScopeAllCount'),
+  btnCancelCheckProfileModal: document.getElementById('btnCancelCheckProfileModal'),
+  btnConfirmCheckProfileModal: document.getElementById('btnConfirmCheckProfileModal'),
 
   batchConfirmModal: document.getElementById('batchConfirmModal'),
   batchModalTargetMode: document.getElementById('batchModalTargetMode'),
@@ -493,6 +501,10 @@ function updatePillCounts() {
   if (el.batchScopeAllCount) el.batchScopeAllCount.textContent = `${userCount + systemCount} 個`;
   if (el.batchScopeSystemCount) el.batchScopeSystemCount.textContent = `${systemCount} 個`;
 
+  if (el.checkProfileScopeFrequentlyUsedCount) el.checkProfileScopeFrequentlyUsedCount.textContent = `${state.apps.frequentlyUsed.length} 個`;
+  if (el.checkProfileScopeUserCount) el.checkProfileScopeUserCount.textContent = `${userCount} 個`;
+  if (el.checkProfileScopeAllCount) el.checkProfileScopeAllCount.textContent = `${userCount + systemCount} 個`;
+
   const verifyCount = allApps.filter((a) => !a.isCannotAot && (a.status || '').toLowerCase() === 'verify').length;
   if (el.fastAotVerifyBadge) {
     el.fastAotVerifyBadge.textContent = `${verifyCount}`;
@@ -557,6 +569,15 @@ function renderAppGrids() {
     });
   });
 
+  // Attach check-profile event listeners
+  document.querySelectorAll('.btn-check-profile').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pkg = btn.dataset.package;
+      await handleCheckSingleAppProfile(pkg, btn);
+    });
+  });
+
   const totalVisible = (showFrequent ? filteredFrequent.length : 0) +
                        (showGeneral ? filteredGeneral.length : 0) +
                        (showCannotAot ? filteredCannotAot.length : 0);
@@ -586,13 +607,64 @@ function createAppCardHtml(app) {
   // Reason badge styling
   const reasonBadgeClass = statusBadgeClass;
 
-  const appMode = app.overrideMode || state.dexoptMode;
-  const isSpeedOverride = app.overrideMode === 'speed';
+  // Issue #5: 有可用 Profile 顯示 speed-profile，無可用 Profile 顯示 speed
+  let appMode;
+  if (app.hasProfile === true) {
+    appMode = 'speed-profile';
+  } else if (app.hasProfile === false) {
+    appMode = 'speed';
+  } else {
+    appMode = app.overrideMode || state.dexoptMode;
+  }
+  const isSpeedOverride = appMode === 'speed';
 
   // System vs User App badge
   const typeBadge = app.isSystem
     ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-300 dark:border-slate-700" title="系統內建應用程式">系統內建</span>`
     : `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200 dark:border-sky-800" title="用戶自己安裝的應用程式">用戶安裝</span>`;
+
+  // Profile readiness badge
+  let profileBadge = '';
+  if (isAotSupported) {
+    if (app.hasProfile === true) {
+      const lineText = typeof app.profileLines === 'number' ? ` (${app.profileLines}L)` : '';
+      profileBadge = `
+        <button
+          type="button"
+          data-package="${app.packageName}"
+          title="Profile 熱點資料齊全${typeof app.profileLines === 'number' ? ` (${app.profileLines} 行)` : ''}，點擊重新檢查"
+          class="btn-check-profile inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border border-indigo-500/40 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 cursor-pointer transition-all active:scale-95"
+        >
+          <svg class="w-3 h-3 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>profile: ready${lineText}</span>
+        </button>
+      `;
+    } else if (app.hasProfile === false) {
+      profileBadge = `
+        <button
+          type="button"
+          data-package="${app.packageName}"
+          title="無可用 Profile 熱點資料 (0 行)，已自動切換為 speed 編譯，點擊重新檢查"
+          class="btn-check-profile inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border border-amber-500/40 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 cursor-pointer transition-all active:scale-95"
+        >
+          <svg class="w-3 h-3 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span>profile: none</span>
+        </button>
+      `;
+    } else {
+      profileBadge = `
+        <button
+          type="button"
+          data-package="${app.packageName}"
+          title="點擊檢查此 App 是否有可用 Profile 熱點資料"
+          class="btn-check-profile inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 cursor-pointer transition-all active:scale-95"
+        >
+          <svg class="w-3 h-3 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>profile: 檢查</span>
+        </button>
+      `;
+    }
+  }
 
   const queueItem = queueManager.getItem(app.packageName);
   let actionButton = '';
@@ -689,6 +761,7 @@ function createAppCardHtml(app) {
         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${reasonBadgeClass}">
           [reason=${app.reason}]
         </span>
+        ${profileBadge}
         ${app.usageTimeFormatted ? `
         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border border-cyan-300 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 ml-auto" title="近期前景使用時間: ${app.usageTimeFormatted}">
           ⏱️ ${app.usageTimeFormatted}
@@ -727,6 +800,13 @@ function updateAppCardInDom(app) {
   const stopBtn = newCard.querySelector('.btn-force-stop-app');
   stopBtn?.addEventListener('click', () => {
     openSingleForceStopModal(app.packageName, app.displayName);
+  });
+
+  // Bind single check-profile action
+  const checkProfileBtn = newCard.querySelector('.btn-check-profile');
+  checkProfileBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await handleCheckSingleAppProfile(app.packageName, checkProfileBtn);
   });
 }
 
@@ -813,6 +893,7 @@ async function handleStartBatch() {
   el.btnFastAot?.setAttribute('disabled', 'true');
   el.btnBatchSpeed?.setAttribute('disabled', 'true');
   el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
+  el.btnBatchCheckProfile?.setAttribute('disabled', 'true');
   el.btnTriggerBgDexopt?.setAttribute('disabled', 'true');
   el.btnCancelBatch?.classList.remove('hidden');
 
@@ -875,6 +956,7 @@ async function handleStartBatch() {
   el.btnFastAot?.removeAttribute('disabled');
   el.btnBatchSpeed?.removeAttribute('disabled');
   el.btnBatchSpeedProfile?.removeAttribute('disabled');
+  el.btnBatchCheckProfile?.removeAttribute('disabled');
   el.btnTriggerBgDexopt?.removeAttribute('disabled');
   el.btnCancelBatch?.classList.add('hidden');
 
@@ -1033,6 +1115,7 @@ async function handleStartFastAot() {
   el.btnFastAot?.setAttribute('disabled', 'true');
   el.btnBatchSpeed?.setAttribute('disabled', 'true');
   el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
+  el.btnBatchCheckProfile?.setAttribute('disabled', 'true');
   el.btnTriggerBgDexopt?.setAttribute('disabled', 'true');
   el.btnCancelBatch?.classList.remove('hidden');
 
@@ -1110,6 +1193,7 @@ async function handleStartFastAot() {
   el.btnFastAot?.removeAttribute('disabled');
   el.btnBatchSpeed?.removeAttribute('disabled');
   el.btnBatchSpeedProfile?.removeAttribute('disabled');
+  el.btnBatchCheckProfile?.removeAttribute('disabled');
   el.btnTriggerBgDexopt?.removeAttribute('disabled');
   el.btnCancelBatch?.classList.add('hidden');
 
@@ -1170,6 +1254,178 @@ function showFastAotResultModal({ total, success, failed, duration, results, was
 
 function closeFastAotResultModal() {
   el.fastAotResultModal?.classList.add('hidden');
+}
+
+/* ---------------- Profile Inspection & Dynamic Mode (Issue #5) ---------------- */
+
+async function handleCheckSingleAppProfile(packageName, buttonEl) {
+  if (!state.connectedDevice) {
+    showToast('尚未連線', '請先連線至 Android 裝置或啟動示範模式。', 'warning');
+    return;
+  }
+  if (state.isBatchRunning || state.isBgDexoptRunning) {
+    showToast('系統忙碌中', '目前有批次或背景任務進行中，請稍候。', 'warning');
+    return;
+  }
+
+  const app = findApp(packageName);
+  if (!app) return;
+
+  if (buttonEl) {
+    buttonEl.innerHTML = `${ICONS.spinner} <span>檢查中...</span>`;
+    buttonEl.disabled = true;
+  }
+
+  appendTerminalLog(`\n[Profile 檢查] 開始檢查 ${app.displayName} (${packageName}) 之 Profile 熱點資料...\n`);
+
+  try {
+    const res = await adbController.checkAppProfile(packageName, {
+      onOutput: (chunk) => appendTerminalLog(chunk),
+    });
+
+    app.hasProfile = res.hasProfile;
+    app.profileLines = res.lineCount;
+    app.overrideMode = res.hasProfile ? 'speed-profile' : 'speed';
+
+    const statusMsg = res.hasProfile
+      ? `已檢測到 Profile 熱點 (${res.lineCount} 行)，已配置為 speed-profile 編譯。`
+      : `未檢測到可用 Profile (0 行)，已自動切換為 speed 編譯以避免退回 verify。`;
+
+    appendTerminalLog(`[Profile 檢查] ${app.displayName}: ${statusMsg}\n`);
+    showToast('Profile 檢查完成', `${app.displayName}：${res.hasProfile ? '有熱點資料 (speed-profile)' : '無熱點資料 (自動轉為 speed)'}`, res.hasProfile ? 'success' : 'info');
+  } catch (err) {
+    appendTerminalLog(`❌ [Profile 檢查] ${app.displayName} 檢查失敗: ${err.message}\n`);
+    showToast('檢查失敗', err.message, 'error');
+  } finally {
+    updateAppCardInDom(app);
+  }
+}
+
+function openCheckProfileModal() {
+  if (!state.connectedDevice) {
+    showToast('尚未連線', '請先連線至 Android 裝置或啟動示範模式。', 'warning');
+    return;
+  }
+  if (state.isBatchRunning || state.isBgDexoptRunning) {
+    showToast('系統忙碌中', '目前已有批次或背景任務正在執行中。', 'warning');
+    return;
+  }
+  updatePillCounts();
+  el.checkProfileConfirmModal?.classList.remove('hidden');
+}
+
+function closeCheckProfileModal() {
+  el.checkProfileConfirmModal?.classList.add('hidden');
+}
+
+async function handleStartBatchCheckProfile() {
+  closeCheckProfileModal();
+  if (state.isBatchRunning || !state.connectedDevice) return;
+
+  const scopeRadio = document.querySelector('input[name="checkProfileScope"]:checked');
+  const scope = scopeRadio ? scopeRadio.value : 'frequently_used';
+
+  let targets = [];
+  if (scope === 'frequently_used') {
+    targets = state.apps.frequentlyUsed.filter((a) => !a.isCannotAot);
+  } else if (scope === 'user') {
+    const seen = new Set();
+    targets = [...state.apps.frequentlyUsed, ...state.apps.general].filter((a) => {
+      if (a.isCannotAot || a.isSystem || seen.has(a.packageName)) return false;
+      seen.add(a.packageName);
+      return true;
+    });
+  } else {
+    const seen = new Set();
+    targets = [...state.apps.frequentlyUsed, ...state.apps.general].filter((a) => {
+      if (a.isCannotAot || seen.has(a.packageName)) return false;
+      seen.add(a.packageName);
+      return true;
+    });
+  }
+
+  if (targets.length === 0) {
+    showToast('無符合目標', '所選範圍內無可檢查之應用程式。', 'warning');
+    return;
+  }
+
+  state.isBatchRunning = true;
+  setLogDrawer(true);
+
+  // UI state updates
+  el.batchProgressBarContainer?.classList.remove('hidden');
+  if (el.batchProgressTitle) {
+    const scopeLabel = scope === 'frequently_used' ? '常用' : scope === 'user' ? '用戶安裝' : '全部';
+    el.batchProgressTitle.textContent = `檢查 App Profile 熱點資料中 (${scopeLabel}範圍)`;
+  }
+  el.btnFastAot?.setAttribute('disabled', 'true');
+  el.btnBatchSpeed?.setAttribute('disabled', 'true');
+  el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
+  el.btnBatchCheckProfile?.setAttribute('disabled', 'true');
+  el.btnTriggerBgDexopt?.setAttribute('disabled', 'true');
+  el.btnCancelBatch?.classList.remove('hidden');
+
+  let withProfileCount = 0;
+  let withoutProfileCount = 0;
+  const startTime = Date.now();
+
+  appendTerminalLog(`\n========== 開始批次檢查 Profile 熱點資料 (目標數: ${targets.length}, 範圍: ${scope}) ==========\n`);
+
+  for (let i = 0; i < targets.length; i++) {
+    if (!state.isBatchRunning) {
+      appendTerminalLog(`\n⚠️ 批次 Profile 檢查已由使用者中斷。\n`);
+      showToast('Profile 檢查已中斷', `已執行 ${i}/${targets.length} 個應用程式。`, 'warning');
+      break;
+    }
+
+    const app = targets[i];
+    const pct = Math.round(((i + 1) / targets.length) * 100);
+
+    if (el.batchProgressCount) el.batchProgressCount.textContent = `[${i + 1}/${targets.length}] (${pct}%)`;
+    if (el.batchProgressBar) el.batchProgressBar.style.width = `${pct}%`;
+    if (el.batchProgressCurrentApp) el.batchProgressCurrentApp.textContent = `正在檢查 Profile [${i + 1}/${targets.length}]: ${app.displayName} (${app.packageName})`;
+
+    try {
+      const res = await adbController.checkAppProfile(app.packageName, {
+        onOutput: (chunk) => appendTerminalLog(chunk),
+      });
+      app.hasProfile = res.hasProfile;
+      app.profileLines = res.lineCount;
+      app.overrideMode = res.hasProfile ? 'speed-profile' : 'speed';
+
+      if (res.hasProfile) {
+        withProfileCount++;
+      } else {
+        withoutProfileCount++;
+      }
+    } catch (err) {
+      appendTerminalLog(`❌ [${app.packageName}] Profile 檢查失敗: ${err.message}\n`);
+    } finally {
+      updateAppCardInDom(app);
+    }
+  }
+
+  const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
+  const wasCancelled = !state.isBatchRunning;
+  appendTerminalLog(`\n========== Profile 檢查${wasCancelled ? '已中斷' : '完成'} (有 Profile: ${withProfileCount}, 無 Profile: ${withoutProfileCount}, 總耗時: ${totalDuration}s) ==========\n`);
+
+  state.isBatchRunning = false;
+  el.btnFastAot?.removeAttribute('disabled');
+  el.btnBatchSpeed?.removeAttribute('disabled');
+  el.btnBatchSpeedProfile?.removeAttribute('disabled');
+  el.btnBatchCheckProfile?.removeAttribute('disabled');
+  el.btnTriggerBgDexopt?.removeAttribute('disabled');
+  el.btnCancelBatch?.classList.add('hidden');
+
+  setTimeout(() => {
+    if (!state.isBatchRunning) {
+      el.batchProgressBarContainer?.classList.add('hidden');
+    }
+  }, 3500);
+
+  if (!wasCancelled) {
+    showToast('Profile 檢查完成', `共檢查 ${targets.length} 個應用程式：${withProfileCount} 個有熱點 (speed-profile)，${withoutProfileCount} 個無熱點 (speed)。`, 'success');
+  }
 }
 
 /* ---------------- Force Stop Actions ---------------- */
@@ -1488,6 +1744,12 @@ el.btnStopBatchProgress?.addEventListener('click', handleCancelBatch);
 el.btnBatchForceStop?.addEventListener('click', openBatchForceStopModal);
 el.btnCancelForceStopModal?.addEventListener('click', closeForceStopModal);
 el.btnConfirmForceStopModal?.addEventListener('click', handleConfirmForceStop);
+
+/* ---------------- Check Profile Listeners (Issue #5) ---------------- */
+
+el.btnBatchCheckProfile?.addEventListener('click', openCheckProfileModal);
+el.btnCancelCheckProfileModal?.addEventListener('click', closeCheckProfileModal);
+el.btnConfirmCheckProfileModal?.addEventListener('click', handleStartBatchCheckProfile);
 
 /* ---------------- Search & Filter Pills ---------------- */
 

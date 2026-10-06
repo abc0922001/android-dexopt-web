@@ -101,6 +101,12 @@
             <span id="fastAotVerifyBadge" class="hidden px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-mono font-bold">0</span>
           </button>
 
+          <!-- Check Profile Hotspot Data (Issue #5) -->
+          <button id="btnBatchCheckProfile" aria-label="檢查應用程式 Profile 熱點資料" title="檢查應用程式是否有可用的 Profile 熱點資料；若有則顯示 speed-profile 編譯，若無則顯示 speed 編譯" class="px-3.5 py-3 rounded-xl font-semibold text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg class="w-4 h-4 text-indigo-500 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+            <span>檢查 Profile</span>
+          </button>
+
           <!-- Batch Speed-Profile AOT -->
           <button id="btnBatchSpeedProfile" aria-label="批次執行全部 speed-profile AOT" title="對多個應用程式執行 speed-profile 編譯" class="px-3.5 py-3 rounded-xl font-semibold text-xs text-slate-800 dark:text-slate-100 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-300 dark:border-slate-700 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
             <svg class="w-4 h-4 text-cyan-500 fill-current" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
@@ -509,6 +515,86 @@
         </button>
         <button id="btnConfirmForceStopModal" class="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 shadow-md shadow-rose-500/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95">
           <span>確認強制停止</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Check Profile Confirmation Modal (Issue #5) -->
+  <div id="checkProfileConfirmModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="checkProfileModalTitle">
+    <div class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-start gap-3.5">
+        <div class="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-500 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 id="checkProfileModalTitle" class="text-base font-bold text-slate-900 dark:text-white">
+            檢查應用程式 Profile 熱點資料
+          </h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            檢查 App 是否有可用 Profile，有則顯示 speed-profile，無則顯示 speed 編譯
+          </p>
+        </div>
+      </div>
+
+      <!-- Feature Explanation Box -->
+      <div class="bg-indigo-500/10 border border-indigo-500/25 rounded-xl p-3.5 text-xs text-indigo-950 dark:text-indigo-200 space-y-2 leading-relaxed">
+        <div class="font-semibold flex items-center gap-1.5 text-indigo-950 dark:text-indigo-100">
+          <span>⚡ 標準檢查機制（免 Root）：</span>
+        </div>
+        <ul class="list-disc list-inside space-y-1 text-[11px] text-indigo-800 dark:text-indigo-300">
+          <li><strong>導出快照：</strong>執行 <code class="px-1 py-0.5 bg-indigo-500/20 rounded font-mono">cmd package dump-profiles &lt;package&gt;</code> 將 ART 記憶體熱點寫出。</li>
+          <li><strong>檢視內容：</strong>讀取 <code class="px-1 py-0.5 bg-indigo-500/20 rounded font-mono">/data/misc/profman/&lt;package&gt;.txt</code> 行數，大於 0 行代表已有熱點資料。</li>
+          <li><strong>智慧顯示：</strong>有 Profile 者按鈕顯示 <strong class="text-emerald-700 dark:text-emerald-300 font-mono">speed-profile 編譯</strong>；無 Profile 者自動轉為 <strong class="text-amber-700 dark:text-amber-300 font-mono">speed 編譯</strong>。</li>
+        </ul>
+      </div>
+
+      <!-- Scope Selection -->
+      <div class="space-y-2">
+        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+          選擇檢查範圍 (Scope)：
+        </label>
+        <div class="space-y-2 text-xs">
+          <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-500/5">
+            <input type="radio" name="checkProfileScope" value="frequently_used" checked class="text-indigo-600 focus:ring-indigo-500">
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-medium text-slate-900 dark:text-slate-100">常用應用程式 (Frequently Used Apps)</span>
+                <span id="checkProfileScopeFrequentlyUsedCount" class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">0 個</span>
+              </div>
+              <p class="text-[11px] text-slate-500">優先針對近期常用活躍之 App 檢查 Profile，耗時短、效率高。</p>
+            </div>
+          </label>
+          <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-500/5">
+            <input type="radio" name="checkProfileScope" value="user" class="text-indigo-600 focus:ring-indigo-500">
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-medium text-slate-900 dark:text-slate-100">使用者安裝應用程式 (User Apps)</span>
+                <span id="checkProfileScopeUserCount" class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">0 個</span>
+              </div>
+              <p class="text-[11px] text-slate-500">檢查所有自行安裝或更新之應用程式。</p>
+            </div>
+          </label>
+          <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-500/5">
+            <input type="radio" name="checkProfileScope" value="all" class="text-indigo-600 focus:ring-indigo-500">
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-medium text-slate-900 dark:text-slate-100">全部應用程式 (All Apps，含系統預裝)</span>
+                <span id="checkProfileScopeAllCount" class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">0 個</span>
+              </div>
+              <p class="text-[11px] text-slate-500">檢查裝置內所有具備程式碼的應用程式。</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button id="btnCancelCheckProfileModal" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
+          取消
+        </button>
+        <button id="btnConfirmCheckProfileModal" class="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-500/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95">
+          <span>開始檢查</span>
         </button>
       </div>
     </div>

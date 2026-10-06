@@ -21,7 +21,7 @@ import {
 } from './parser.js';
 
 export class AdbController {
-  constructor({ onLog, onStatusChange, onDeviceDisconnected }) {
+  constructor({ onLog, onStatusChange, onDeviceDisconnected } = {}) {
     this.adb = null;
     this.device = null;
     this.deviceInfo = null;
@@ -442,7 +442,72 @@ export class AdbController {
     return res;
   }
 
+  /**
+   * Check if an application has an available Profile hotspot data file
+   * Uses standard non-root commands:
+   * 1. `cmd package dump-profiles <packageName>` to flush and dump snapshot to /data/misc/profman/<packageName>.txt
+   * 2. `cat /data/misc/profman/<packageName>.txt` to check contents and count lines
+   *
+   * @param {string} packageName
+   * @returns {Promise<{ hasProfile: boolean, lineCount: number }>}
+   */
+  async checkAppProfile(packageName) {
+    this.log('Profile 檢查', `正在檢查 [${packageName}] 之 Profile 熱點資料...`);
+
+    if (this.isDemoMode) {
+      return this._mockCheckAppProfile(packageName);
+    }
+
+    if (!this.adb) {
+      throw new Error('裝置尚未連線。');
+    }
+
+    try {
+      // Step 1: Force system to dump profile snapshot to /data/misc/profman/<packageName>.txt
+      await this.exec(['cmd', 'package', 'dump-profiles', packageName]);
+
+      // Step 2: Read exported profile contents and count lines
+      const catRes = await this.exec(['cat', `/data/misc/profman/${packageName}.txt`]);
+      const stdout = (catRes.stdout || '').trim();
+      const isNotFound = !stdout || stdout.includes('No such file or directory') || stdout.includes('not found');
+
+      if (isNotFound) {
+        this.log('Profile 檢查', `[${packageName}] 未發現可用 Profile 檔案 (0 bytes 或不存在)`);
+        return { hasProfile: false, lineCount: 0 };
+      }
+
+      const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      const lineCount = lines.length;
+      const hasProfile = lineCount > 0;
+
+      this.log('Profile 檢查', `[${packageName}] 檢查結果: ${hasProfile ? `有可用 Profile (${lineCount} 行)` : '無可用 Profile (0 行)'}`);
+      return { hasProfile, lineCount };
+    } catch (err) {
+      this.log('警告', `[${packageName}] Profile 檢查失敗: ${err.message}`);
+      return { hasProfile: false, lineCount: 0, error: err.message };
+    }
+  }
+
   /* ---------------- Mock / Demo Methods for Instant Browser Testing ---------------- */
+
+  async _mockCheckAppProfile(packageName) {
+    await new Promise((r) => setTimeout(r, 200));
+    const profileApps = {
+      'com.google.android.chrome': 2840,
+      'jp.naver.line.android': 1520,
+      'com.android.chrome.beta': 1180,
+      'com.google.android.youtube': 3410,
+      'org.telegram.messenger': 890,
+      'com.google.android.gm': 1250,
+    };
+    if (profileApps[packageName]) {
+      const lineCount = profileApps[packageName];
+      this.log('Profile 檢查', `[${packageName}] (示範模式) 檢測到 Profile (${lineCount} 行)`);
+      return { hasProfile: true, lineCount };
+    }
+    this.log('Profile 檢查', `[${packageName}] (示範模式) 未檢測到 Profile (0 行)`);
+    return { hasProfile: false, lineCount: 0 };
+  }
 
   async _mockExec(commandArray, { onOutput }) {
     const cmd = commandArray.join(' ');
@@ -496,6 +561,9 @@ export class AdbController {
         status: 'speed-profile',
         reason: 'bg-dexopt',
         hasCode: true,
+        hasProfile: true,
+        profileLines: 2840,
+        overrideMode: 'speed-profile',
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '2h 45m',
@@ -508,6 +576,9 @@ export class AdbController {
         status: 'speed-profile',
         reason: 'bg-dexopt',
         hasCode: true,
+        hasProfile: true,
+        profileLines: 1520,
+        overrideMode: 'speed-profile',
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '1h 30m',
@@ -520,6 +591,9 @@ export class AdbController {
         status: 'speed-profile',
         reason: 'bg-dexopt',
         hasCode: true,
+        hasProfile: true,
+        profileLines: 1180,
+        overrideMode: 'speed-profile',
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '54m',
@@ -532,6 +606,9 @@ export class AdbController {
         status: 'speed-profile',
         reason: 'bg-dexopt',
         hasCode: true,
+        hasProfile: true,
+        profileLines: 3410,
+        overrideMode: 'speed-profile',
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '48m',
@@ -544,6 +621,9 @@ export class AdbController {
         status: 'speed',
         reason: 'cmdline',
         hasCode: true,
+        hasProfile: false,
+        profileLines: 0,
+        overrideMode: 'speed',
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '35m',
@@ -556,6 +636,9 @@ export class AdbController {
         status: 'speed-profile',
         reason: 'bg-dexopt',
         hasCode: true,
+        hasProfile: true,
+        profileLines: 890,
+        overrideMode: 'speed-profile',
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '22m',
@@ -571,6 +654,9 @@ export class AdbController {
         status: 'verify',
         reason: 'vdex',
         hasCode: true,
+        hasProfile: false,
+        profileLines: 0,
+        overrideMode: 'speed',
         isCannotAot: false,
         tier: 'general',
       },
@@ -582,6 +668,9 @@ export class AdbController {
         status: 'verify',
         reason: 'vdex',
         hasCode: true,
+        hasProfile: false,
+        profileLines: 0,
+        overrideMode: 'speed',
         isCannotAot: false,
         tier: 'general',
       },
@@ -593,6 +682,9 @@ export class AdbController {
         status: 'verify',
         reason: 'vdex',
         hasCode: true,
+        hasProfile: false,
+        profileLines: 0,
+        overrideMode: 'speed',
         isCannotAot: false,
         tier: 'general',
       },
@@ -604,6 +696,9 @@ export class AdbController {
         status: 'verify',
         reason: 'vdex',
         hasCode: true,
+        hasProfile: false,
+        profileLines: 0,
+        overrideMode: 'speed',
         isCannotAot: false,
         tier: 'general',
       },
@@ -615,6 +710,9 @@ export class AdbController {
         status: 'verify',
         reason: 'vdex',
         hasCode: true,
+        hasProfile: false,
+        profileLines: 0,
+        overrideMode: 'speed',
         isCannotAot: false,
         tier: 'general',
       },
@@ -626,6 +724,9 @@ export class AdbController {
         status: 'speed-profile',
         reason: 'bg-dexopt',
         hasCode: true,
+        hasProfile: true,
+        profileLines: 1250,
+        overrideMode: 'speed-profile',
         isCannotAot: false,
         tier: 'general',
       },
