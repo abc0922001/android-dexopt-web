@@ -96,3 +96,20 @@ test('main.js determines appMode dynamically based on hasProfile and binds profi
   assert.ok(mainJs.includes('el.btnBatchCheckProfile?.addEventListener'), 'main.js must bind btnBatchCheckProfile');
   assert.ok(mainJs.includes('.btn-check-profile'), 'main.js must support .btn-check-profile clicks');
 });
+
+test('index.html sortSelect contains profile sorting options', () => {
+  const html = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf-8');
+
+  assert.ok(html.includes('value="profile_ready_first"'), 'sortSelect must include profile_ready_first option');
+  assert.ok(html.includes('value="profile_none_first"'), 'sortSelect must include profile_none_first option');
+});
+
+test('adb-controller.js supports multi-track profile inspection with root and dumpsys fallback', () => {
+  const adbCode = fs.readFileSync(path.join(rootDir, 'src/adb-controller.js'), 'utf-8');
+
+  // Verify multi-track inspection logic
+  assert.ok(adbCode.includes('Permission denied'), 'checkAppProfile must detect Permission denied');
+  assert.ok(adbCode.includes("'su', '-c'"), 'checkAppProfile must attempt root fallback when available');
+  assert.ok(adbCode.includes("status === 'speed-profile'"), 'checkAppProfile must fallback to dumpsys speed-profile state');
+});
+

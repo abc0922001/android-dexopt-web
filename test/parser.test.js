@@ -365,5 +365,48 @@ test('classifyApps does not format 0 foregroundMs into fake 1m', () => {
   assert.strictEqual(am.usageTimeFormatted, '');
 });
 
+test('sortApps correctly sorts apps by profile_ready_first', () => {
+  const apps = [
+    { displayName: 'App Without Profile', hasProfile: false, profileLines: 0 },
+    { displayName: 'App Ready High Lines', hasProfile: true, profileLines: 2500 },
+    { displayName: 'App Ready Low Lines', hasProfile: true, profileLines: 300 },
+    { displayName: 'App Ready Dumpsys State', hasProfile: true, profileLines: null },
+    { displayName: 'App Unchecked', hasProfile: undefined, profileLines: 0 },
+  ];
+
+  const sorted = sortApps(apps, 'profile_ready_first');
+
+  // Apps with profile: true must come first
+  assert.strictEqual(sorted[0].displayName, 'App Ready High Lines');
+  assert.strictEqual(sorted[1].displayName, 'App Ready Low Lines');
+  assert.strictEqual(sorted[2].displayName, 'App Ready Dumpsys State');
+  // Then unchecked (undefined)
+  assert.strictEqual(sorted[3].displayName, 'App Unchecked');
+  // Finally apps with confirmed no profile
+  assert.strictEqual(sorted[4].displayName, 'App Without Profile');
+});
+
+test('sortApps correctly sorts apps by profile_none_first', () => {
+  const apps = [
+    { displayName: 'App Ready', hasProfile: true, profileLines: 1500, status: 'speed-profile' },
+    { displayName: 'App Unchecked', hasProfile: undefined, status: 'speed' },
+    { displayName: 'App Without Profile Verify', hasProfile: false, profileLines: 0, status: 'verify' },
+    { displayName: 'App Without Profile Unknown', hasProfile: false, profileLines: 0, status: 'unknown' },
+  ];
+
+  const sorted = sortApps(apps, 'profile_none_first');
+
+  // Apps without profile (hasProfile === false) come first
+  assert.strictEqual(sorted[0].hasProfile, false);
+  assert.strictEqual(sorted[1].hasProfile, false);
+  // Unknown priority higher than verify
+  assert.strictEqual(sorted[0].displayName, 'App Without Profile Unknown');
+  assert.strictEqual(sorted[1].displayName, 'App Without Profile Verify');
+  // Then unchecked
+  assert.strictEqual(sorted[2].displayName, 'App Unchecked');
+  // Finally app with profile
+  assert.strictEqual(sorted[3].displayName, 'App Ready');
+});
+
 
 

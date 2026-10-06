@@ -627,12 +627,17 @@ function createAppCardHtml(app) {
   let profileBadge = '';
   if (isAotSupported) {
     if (app.hasProfile === true) {
-      const lineText = typeof app.profileLines === 'number' ? ` (${app.profileLines}L)` : '';
+      let lineText = '';
+      if (typeof app.profileLines === 'number' && app.profileLines > 0) {
+        lineText = ` (${app.profileLines}L)`;
+      } else {
+        lineText = ' (已生效)';
+      }
       profileBadge = `
         <button
           type="button"
           data-package="${app.packageName}"
-          title="Profile 熱點資料齊全${typeof app.profileLines === 'number' ? ` (${app.profileLines} 行)` : ''}，點擊重新檢查"
+          title="Profile 熱點資料齊全${typeof app.profileLines === 'number' && app.profileLines > 0 ? ` (${app.profileLines} 行)` : ' (系統狀態已生效)'}，點擊重新檢查"
           class="btn-check-profile inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border border-indigo-500/40 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 cursor-pointer transition-all active:scale-95"
         >
           <svg class="w-3 h-3 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -1280,6 +1285,8 @@ async function handleCheckSingleAppProfile(packageName, buttonEl) {
 
   try {
     const res = await adbController.checkAppProfile(packageName, {
+      currentStatus: app.status,
+      currentReason: app.reason,
       onOutput: (chunk) => appendTerminalLog(chunk),
     });
 
@@ -1287,17 +1294,23 @@ async function handleCheckSingleAppProfile(packageName, buttonEl) {
     app.profileLines = res.lineCount;
     app.overrideMode = res.hasProfile ? 'speed-profile' : 'speed';
 
+    const lineDesc = typeof res.lineCount === 'number' && res.lineCount > 0 ? ` (${res.lineCount} 行)` : (res.source === 'dumpsys' ? ' (系統狀態已生效)' : '');
     const statusMsg = res.hasProfile
-      ? `已檢測到 Profile 熱點 (${res.lineCount} 行)，已配置為 speed-profile 編譯。`
+      ? `已檢測到 Profile 熱點${lineDesc}，已配置為 speed-profile 編譯。`
       : `未檢測到可用 Profile (0 行)，已自動切換為 speed 編譯以避免退回 verify。`;
 
     appendTerminalLog(`[Profile 檢查] ${app.displayName}: ${statusMsg}\n`);
-    showToast('Profile 檢查完成', `${app.displayName}：${res.hasProfile ? '有熱點資料 (speed-profile)' : '無熱點資料 (自動轉為 speed)'}`, res.hasProfile ? 'success' : 'info');
+    showToast('Profile 檢查完成', `${app.displayName}：${res.hasProfile ? `有熱點資料${lineDesc} (speed-profile)` : '無熱點資料 (自動轉為 speed)'}`, res.hasProfile ? 'success' : 'info');
   } catch (err) {
     appendTerminalLog(`❌ [Profile 檢查] ${app.displayName} 檢查失敗: ${err.message}\n`);
     showToast('檢查失敗', err.message, 'error');
   } finally {
-    updateAppCardInDom(app);
+    if (state.sortOrder === 'profile_ready_first' || state.sortOrder === 'profile_none_first') {
+      applySortOrder();
+      renderAppGrids();
+    } else {
+      updateAppCardInDom(app);
+    }
   }
 }
 
@@ -1387,6 +1400,8 @@ async function handleStartBatchCheckProfile() {
 
     try {
       const res = await adbController.checkAppProfile(app.packageName, {
+        currentStatus: app.status,
+        currentReason: app.reason,
         onOutput: (chunk) => appendTerminalLog(chunk),
       });
       app.hasProfile = res.hasProfile;
@@ -1416,6 +1431,12 @@ async function handleStartBatchCheckProfile() {
   el.btnBatchCheckProfile?.removeAttribute('disabled');
   el.btnTriggerBgDexopt?.removeAttribute('disabled');
   el.btnCancelBatch?.classList.add('hidden');
+
+  // 如果當前選取的排序是 Profile 相關排序，於完成後重新排序卡片網格
+  if (state.sortOrder === 'profile_ready_first' || state.sortOrder === 'profile_none_first') {
+    applySortOrder();
+    renderAppGrids();
+  }
 
   setTimeout(() => {
     if (!state.isBatchRunning) {

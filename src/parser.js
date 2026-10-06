@@ -613,6 +613,52 @@ export function sortApps(apps, sortMode = 'default') {
     case 'usage_desc':
       return list.sort((a, b) => (b.foregroundMs || 0) - (a.foregroundMs || 0) || a.displayName.localeCompare(b.displayName));
 
+    case 'profile_ready_first':
+      return list.sort((a, b) => {
+        // 具備熱點優先 (3: 有 Profile, 2: 未檢查, 1: 無 Profile)
+        const getProfilePriority = (app) => {
+          if (app.hasProfile === true) return 3;
+          if (app.hasProfile === undefined) return 2;
+          return 1;
+        };
+        const pA = getProfilePriority(a);
+        const pB = getProfilePriority(b);
+        if (pA !== pB) return pB - pA;
+
+        // 若皆具備 Profile，熱點行數多者優先
+        if (a.hasProfile === true && b.hasProfile === true) {
+          const linesA = typeof a.profileLines === 'number' ? a.profileLines : 0;
+          const linesB = typeof b.profileLines === 'number' ? b.profileLines : 0;
+          if (linesA !== linesB) return linesB - linesA;
+        }
+
+        // 次要條件：使用時間降冪，最後依名稱排序
+        if ((b.foregroundMs || 0) !== (a.foregroundMs || 0)) {
+          return (b.foregroundMs || 0) - (a.foregroundMs || 0);
+        }
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+    case 'profile_none_first':
+      return list.sort((a, b) => {
+        // 無熱點優先 (3: 確認無 Profile, 2: 未檢查, 1: 有 Profile)
+        const getNonePriority = (app) => {
+          if (app.hasProfile === false) return 3;
+          if (app.hasProfile === undefined) return 2;
+          return 1;
+        };
+        const pA = getNonePriority(a);
+        const pB = getNonePriority(b);
+        if (pA !== pB) return pB - pA;
+
+        // 次要條件：優先排列尚未完整 AOT 之狀態 (verify/unknown 優先)
+        if (a.status !== b.status) {
+          const diff = getStatusPriority(b.status, 'unknown_first') - getStatusPriority(a.status, 'unknown_first');
+          if (diff !== 0) return diff;
+        }
+        return a.displayName.localeCompare(b.displayName);
+      });
+
     case 'default':
     default:
       return list;
