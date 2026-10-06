@@ -474,39 +474,91 @@ export class AdbController {
     }
 
     try {
-      // Step 1: Force system to dump profile snapshot to /data/misc/profman/<packageName>.txt
+      // Step 1: Force system to dump profile snapshot to profman text file
+      let dumpOutputText = '';
       try {
-        await this.exec(['cmd', 'package', 'dump-profiles', packageName], { onOutput });
+        const dumpRes = await this.exec(['cmd', 'package', 'dump-profiles', packageName], {
+          onOutput: (chunk, isErr) => {
+            dumpOutputText += chunk;
+            onOutput?.(chunk, isErr);
+          },
+        });
+        dumpOutputText += `${dumpRes?.stdout || ''}\n${dumpRes?.stderr || ''}`;
       } catch (dumpErr) {
         // cmd package dump-profiles might fail on very old Android or restricted ROMs, continue to fallback
       }
 
-      // Step 2: Read exported profile contents and count lines
-      const catRes = await this.exec(['cat', `/data/misc/profman/${packageName}.txt`]);
-      const stdout = (catRes.stdout || '').trim();
-      const stderr = (catRes.stderr || '').trim();
-      const combined = `${stdout}\n${stderr}`;
+      // Extract file paths from dump-profiles output (e.g. "Profile saved to '/data/misc/profman/<pkg>-primary.prof.txt'")
+      const savedMatches = [];
+      const regex = /Profile saved to '([^']+)'/gi;
+      let m;
+      while ((m = regex.exec(dumpOutputText)) !== null) {
+        if (m[1]) savedMatches.push(m[1].trim());
+      }
 
-      const isPermissionDenied = combined.includes('Permission denied') || combined.includes('permission denied');
-      const isNotFound = !isPermissionDenied && (!stdout || stdout.includes('No such file or directory') || stdout.includes('not found'));
+      // Build prioritized list of candidate paths to inspect
+      const candidatePaths = new Set([
+        ...savedMatches,
+        `/data/misc/profman/${packageName}-primary.prof.txt`,
+        `/data/misc/profman/${packageName}.txt`,
+        `/data/misc/profman/${packageName}.prof.txt`,
+        `/data/misc/profman/${packageName}.primary.prof.txt`,
+      ]);
 
-      // If Permission denied, attempt root (su) read if available
-      if (isPermissionDenied) {
+      let totalLineCount = 0;
+      let fileFound = false;
+      let permissionDenied = false;
+      const pathsToTry = savedMatches.length > 0 ? savedMatches : Array.from(candidatePaths);
+
+      for (const filePath of pathsToTry) {
         try {
-          const suRes = await this.exec(['su', '-c', `cat /data/misc/profman/${packageName}.txt`]);
-          const suOut = (suRes.stdout || '').trim();
-          if (suOut && !suOut.includes('Permission denied') && !suOut.includes('not found') && !suOut.includes('No such file')) {
-            const lines = suOut.split(/\r?\n/).filter((l) => l.trim().length > 0);
-            const lineCount = lines.length;
-            const hasProfile = lineCount > 0;
-            this.log('Profile 檢查', `[${packageName}] (Root 模式) 成功讀取 Profile 檔案 (${lineCount} 行)`);
-            return { hasProfile, lineCount, source: 'root_file', detail: `${lineCount} 行熱點代碼 (Root)` };
+          const catRes = await this.exec(['cat', filePath]);
+          const stdout = (catRes.stdout || '').trim();
+          const stderr = (catRes.stderr || '').trim();
+          const combined = `${stdout}\n${stderr}`;
+
+          if (combined.includes('Permission denied') || combined.includes('permission denied')) {
+            permissionDenied = true;
+            // Attempt root (su) read if available
+            try {
+              const suRes = await this.exec(['su', '-c', `cat ${filePath}`]);
+              const suOut = (suRes.stdout || '').trim();
+              if (suOut && !suOut.includes('Permission denied') && !suOut.includes('not found') && !suOut.includes('No such file')) {
+                const lines = suOut.split(/\r?\n/).filter((l) => l.trim().length > 0);
+                totalLineCount += lines.length;
+                fileFound = true;
+              }
+            } catch {
+              // su not available
+            }
+          } else if (stdout && !stdout.includes('No such file or directory') && !stdout.includes('not found')) {
+            const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+            totalLineCount += lines.length;
+            fileFound = true;
+            // If scanning candidates without exact savedMatches and found valid lines, that's our match
+            if (savedMatches.length === 0 && lines.length > 0) {
+              break;
+            }
           }
         } catch {
-          // su not supported, proceed to dumpsys fallback
+          // ignore error for single candidate file
         }
+      }
 
-        // Non-root fallback: Inspect dumpsys package dexopt state
+      // Case 1: Successfully read profile file(s)
+      if (fileFound) {
+        const hasProfile = totalLineCount > 0;
+        this.log('Profile 檢查', `[${packageName}] 檢查結果: ${hasProfile ? `有可用 Profile (${totalLineCount} 行)` : 'Profile 檔案為空 (0 行)'}`);
+        return {
+          hasProfile,
+          lineCount: totalLineCount,
+          source: permissionDenied ? 'root_file' : 'file',
+          detail: `${totalLineCount} 行熱點代碼`,
+        };
+      }
+
+      // Case 2: Encountered Permission denied on non-root device
+      if (permissionDenied) {
         let status = currentStatus;
         let reason = currentReason;
         let hasDmOrProfile = false;
@@ -544,35 +596,26 @@ export class AdbController {
         }
       }
 
-      if (isNotFound) {
-        // Double check dumpsys just in case it is already speed-profile
-        let status = currentStatus;
-        if (!status || status === 'unknown') {
-          const dumpRes = await this.exec(['dumpsys', 'package', packageName]);
-          const parsed = parseSinglePackageDexopt(dumpRes.stdout || '');
-          status = parsed.status;
-        }
-
-        if (status === 'speed-profile') {
-          this.log('Profile 檢查', `[${packageName}] 檔案未產生，但 dumpsys 狀態已確認為 speed-profile`);
-          return {
-            hasProfile: true,
-            lineCount: null,
-            source: 'dumpsys',
-            detail: 'Profile 已生效 (speed-profile)',
-          };
-        }
-
-        this.log('Profile 檢查', `[${packageName}] 未發現可用 Profile 檔案 (0 bytes 或不存在)`);
-        return { hasProfile: false, lineCount: 0, source: 'file_not_found', detail: '未發現可用 Profile' };
+      // Case 3: File not found, check dumpsys fallback
+      let status = currentStatus;
+      if (!status || status === 'unknown') {
+        const dumpRes = await this.exec(['dumpsys', 'package', packageName]);
+        const parsed = parseSinglePackageDexopt(dumpRes.stdout || '');
+        status = parsed.status;
       }
 
-      const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      const lineCount = lines.length;
-      const hasProfile = lineCount > 0;
+      if (status === 'speed-profile') {
+        this.log('Profile 檢查', `[${packageName}] 檔案未產生，但 dumpsys 狀態已確認為 speed-profile`);
+        return {
+          hasProfile: true,
+          lineCount: null,
+          source: 'dumpsys',
+          detail: 'Profile 已生效 (speed-profile)',
+        };
+      }
 
-      this.log('Profile 檢查', `[${packageName}] 檢查結果: ${hasProfile ? `有可用 Profile (${lineCount} 行)` : '無可用 Profile (0 行)'}`);
-      return { hasProfile, lineCount, source: 'file', detail: `${lineCount} 行熱點代碼` };
+      this.log('Profile 檢查', `[${packageName}] 未發現可用 Profile 檔案 (未產生熱點或尚未由系統記錄)`);
+      return { hasProfile: false, lineCount: 0, source: 'file_not_found', detail: '未發現可用 Profile' };
     } catch (err) {
       this.log('警告', `[${packageName}] Profile 檢查失敗: ${err.message}`);
       return { hasProfile: false, lineCount: 0, error: err.message, source: 'error', detail: err.message };

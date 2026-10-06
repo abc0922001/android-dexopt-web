@@ -113,3 +113,12 @@ test('adb-controller.js supports multi-track profile inspection with root and du
   assert.ok(adbCode.includes("status === 'speed-profile'"), 'checkAppProfile must fallback to dumpsys speed-profile state');
 });
 
+test('adb-controller.js extracts saved profile path dynamically and tests primary.prof.txt', () => {
+  const adbCode = fs.readFileSync(path.join(rootDir, 'src/adb-controller.js'), 'utf-8');
+
+  // Verify dynamic path extraction and primary.prof.txt support
+  assert.ok(adbCode.includes("Profile saved to '([^']+)'"), 'checkAppProfile must parse Profile saved to path from dump output');
+  assert.ok(adbCode.includes('-primary.prof.txt'), 'checkAppProfile must test primary.prof.txt variant path');
+});
+
+
