@@ -64,6 +64,7 @@ android-dexopt-web/
 │   ├── adb-controller.js   # ADB 控制層：WebUSB 連線認證、Subprocess 指令執行、示範模式 Mock
 │   ├── parser.js           # 純資料解析層：Dumpsys 串流解析、套件分類 (Frequently Used 等)、排序
 │   ├── queue-manager.js    # AOT 佇列管理員：單一 App 連續點擊循序調度、去重、即時狀態流
+│   ├── version.js          # 版本號管理模組：提供統一語意化版本號 (SemVer)
 │   ├── style.css           # Tailwind CSS v4 入口、CSS Container Queries (.app-card)、自訂滾動條
 │   └── icons.js            # SVG 圖示字典與套件專屬圖示對應
 ├── test/                   # 單元測試 (Node.js Native Test Runner)
@@ -71,8 +72,10 @@ android-dexopt-web/
 │   ├── layout.test.js      # 平板/桌面斷點排版與 Headless Chrome 容器查詢計算測試
 │   ├── fastaot.test.js     # 快速 AOT 模式 (無 -f、僅 verify、支援 speed 與 speed-profile) 測試
 │   ├── queue.test.js       # AOT 任務佇列循序執行、取消等待、去重測試
-│   └── offline.test.js     # PWA、Service Worker 快取策略與離線註冊測試
-├── package.json            # 依賴定義與 npm scripts (test, build, preview)
+│   ├── offline.test.js     # PWA、Service Worker 快取策略與離線註冊測試
+│   ├── profile.test.js     # Profile 熱點檢查、UI 與多軌檢測相容性測試
+│   └── version.test.js     # 語意化版本號 (SemVer) 格式與全站同步測試
+├── package.json            # 依賴定義、版本號 (version) 與 npm scripts (test, build, preview)
 └── vite.config.js          # Vite 設定：base: './' (適應 GitHub Pages 子路徑)
 ```
 
@@ -134,6 +137,7 @@ npm run build
 1. 執行 `git status` 與 `git diff`，確認 Staged 變更僅包含該任務的最小相關檔案。
 2. 確認此 Commit 具備**可獨立編譯性**與**可安全回滾性（Revertible）**。
 3. 確認 Commit Message **嚴格使用正體中文（繁體中文）**撰寫。
+4. **確認已修改版本號：每次更新必須依變更性質同步遞增 `package.json` 與 `src/version.js` 的版本號（符合 SemVer 規範）。**
 
 ### 4. 訊息語言與格式規範（Commit Message Language & Format）
 * **強制使用正體中文：** 所有 Git Commit Message（包含標題與內文說明）**一律強制使用正體中文（繁體中文）**撰寫，嚴禁使用簡體中文或純英文 Commit（Conventional Commits 類型標籤如 `feat:`、`fix:` 可保留英文前綴）。
@@ -142,3 +146,33 @@ npm run build
   - `fix: 修復平板模式卡片標題擠壓與排版過窄問題`
   - `docs: 完善 AGENTS.md 架構說明、領域知識與開發規範`
   - `refactor: 抽離 AOT 佇列管理至獨立模組`
+
+---
+
+## 7. 語意化版本號管理規範（Semantic Versioning Protocol）
+
+**重要規則：每次更新任務或提交前，必須嚴格修改版本號！**
+
+版本號由 `package.json` 中的 `"version"` 與 `src/version.js` 中的 `APP_VERSION` 統一維護，並自動渲染於網頁頂部標題徽章（Header Badge）與頁尾（Footer）。
+
+在主流軟體工程規範中（以 **語意化版本語意（Semantic Versioning，簡稱 SemVer）** 為標準），版本號 **1.2.3** 的格式代表 **主版號.次版號.修訂號（Major.Minor.Patch）**。
+
+### 各數字定義與遞增規則
+
+| 位置 | 數字 | 名稱 | 定義與升級時機 | 向下相容性 |
+| --- | --- | --- | --- | --- |
+| **第 1 位** | **1** | **主版號（Major）** | 做了**不向下相容的重大變更**（Breaking changes），如 API 規格重構、舊版函式或介面遭移除，使用者升級可能需要修改程式碼。 | **不相容** |
+| **第 2 位** | **2** | **次版號（Minor）** | 增加了**新功能（Feature）**，但整體維持向下相容，不影響既有功能的呼叫方式。 | **相容** |
+| **第 3 位** | **3** | **修訂號（Patch）** | 僅進行**問題修復（Bug fix）**、安全性修補或內部優化，無新增功能，完全向下相容。 | **相容** |
+
+---
+
+### 遞增與歸零邏輯
+
+* **修改 Patch（3）**：修復問題時遞增，例如 `1.2.3` $\rightarrow$ `1.2.4`。
+* **修改 Minor（2）**：加入新功能時遞增，後方的 Patch 必須**歸零**，例如 `1.2.3` $\rightarrow$ `1.3.0`。
+* **修改 Major（1）**：有破壞性變更時遞增，後方的 Minor 與 Patch 均必須**歸零**，例如 `1.2.3` $\rightarrow$ `2.0.0`。
+
+> **補充規則：**
+> * **先行版本（Pre-release）**：若有測試需求，通常在 Patch 後加上連字號標記，例如 `1.2.3-alpha.1`、`1.2.3-beta`、`1.2.3-rc.1`。
+> * **初期開發（0.y.z）**：主版號為 `0` 時代表軟體處於初期開發階段，API 尚未穩定，任何微調都可能不相容。

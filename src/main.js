@@ -2,6 +2,7 @@ import { AdbController } from './adb-controller.js';
 import { getAppIcon, ICONS } from './icons.js';
 import { sortApps } from './parser.js';
 import { AotQueueManager } from './queue-manager.js';
+import { APP_VERSION, getFormattedVersion } from './version.js';
 
 // Application State
 const state = {
@@ -1865,7 +1866,18 @@ function initOfflineSupport() {
   }
 }
 
+/* ---------------- Application Version Display ---------------- */
+
+function renderAppVersion() {
+  const formatted = getFormattedVersion();
+  const versionEls = document.querySelectorAll('#appVersion, #footerVersion, [data-app-version]');
+  versionEls.forEach((item) => {
+    item.textContent = formatted;
+  });
+}
+
 /* ---------------- Initial Boot ---------------- */
+renderAppVersion();
 applyTheme(state.theme);
 setDexoptMode(state.dexoptMode);
 renderDisconnectedState();
