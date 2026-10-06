@@ -348,16 +348,10 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     const foregroundMs = getUsageMs(pkg);
     const isLauncherApp = launcherSet.has(pkg);
 
-    // Determine initial Profile state based on dumpsys state (Issue #5 - 輔助驗證)
-    let initialHasProfile = undefined;
-    let initialOverrideMode = undefined;
-    if (dexopt.status === 'speed-profile') {
-      initialHasProfile = true;
-      initialOverrideMode = 'speed-profile';
-    } else if (dexopt.status === 'verify') {
-      initialHasProfile = false;
-      initialOverrideMode = 'speed';
-    }
+    // 初始狀態下不預先判定 Profile，所有 App 均為未檢查狀態 (undefined)，
+    // 按鈕一律遵循頂部 Dexopt modes，直到使用者主動點擊檢查 Profile 為止
+    const initialHasProfile = undefined;
+    const initialOverrideMode = undefined;
 
     const appRecord = {
       packageName: pkg,

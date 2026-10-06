@@ -49,7 +49,7 @@ test('AdbController in demo mode performs mock profile check', async () => {
   assert.strictEqual(resNone.lineCount, 0);
 });
 
-test('classifyApps sets initial hasProfile based on status', () => {
+test('classifyApps keeps hasProfile and overrideMode as undefined until explicitly checked', () => {
   const packageList = [
     { packageName: 'com.example.speedprof', path: '/data/app/~~a/base.apk', isSystem: false },
     { packageName: 'com.example.verif', path: '/data/app/~~b/base.apk', isSystem: false },
@@ -66,25 +66,21 @@ test('classifyApps sets initial hasProfile based on status', () => {
   const classified = classifyApps(packageList, usageSet, launcherSet, dexoptMap);
   const all = [...classified.frequentlyUsed, ...classified.general, ...classified.cannotAot];
 
-  const speedProfApp = all.find((a) => a.packageName === 'com.example.speedprof');
-  assert.ok(speedProfApp);
-  assert.strictEqual(speedProfApp.hasProfile, true);
-
-  const verifApp = all.find((a) => a.packageName === 'com.example.verif');
-  assert.ok(verifApp);
-  assert.strictEqual(verifApp.hasProfile, false);
-
-  const speedApp = all.find((a) => a.packageName === 'com.example.speed');
-  assert.ok(speedApp);
-  assert.strictEqual(speedApp.hasProfile, undefined);
+  // All apps must have undefined hasProfile and undefined overrideMode initially
+  // so their buttons follow global Dexopt modes until user manually checks Profile
+  for (const app of all) {
+    assert.strictEqual(app.hasProfile, undefined, `${app.packageName} hasProfile must be undefined on initial scan`);
+    assert.strictEqual(app.overrideMode, undefined, `${app.packageName} overrideMode must be undefined on initial scan`);
+  }
 });
 
 test('main.js determines appMode dynamically based on hasProfile and binds profile actions', () => {
   const mainJs = fs.readFileSync(path.join(rootDir, 'src/main.js'), 'utf-8');
 
   // Verify dynamic mode selection
-  assert.ok(mainJs.includes("if (app.hasProfile === true) {\n    appMode = 'speed-profile';"), 'appMode should be speed-profile if hasProfile is true');
-  assert.ok(mainJs.includes("} else if (app.hasProfile === false) {\n    appMode = 'speed';"), 'appMode should be speed if hasProfile is false');
+  assert.ok(mainJs.includes("appMode = 'speed-profile';"), 'appMode should support speed-profile if hasProfile is true');
+  assert.ok(mainJs.includes("appMode = 'speed';"), 'appMode should support speed if hasProfile is false');
+  assert.ok(mainJs.includes("appMode = state.dexoptMode;"), 'appMode should default to state.dexoptMode before check');
 
   // Verify handlers and modal management
   assert.ok(mainJs.includes('function handleCheckSingleAppProfile'), 'main.js must define handleCheckSingleAppProfile');

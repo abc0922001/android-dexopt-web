@@ -609,15 +609,18 @@ function createAppCardHtml(app) {
   const reasonBadgeClass = statusBadgeClass;
 
   // Issue #5: 有可用 Profile 顯示 speed-profile，無可用 Profile 顯示 speed
+  // 未手動檢查 Profile 前一律遵循頂部 Dexopt modes；檢查後才依結果動態調整
   let appMode;
-  if (app.hasProfile === true) {
+  if (app.overrideMode) {
+    appMode = app.overrideMode;
+  } else if (app.hasProfile === true) {
     appMode = 'speed-profile';
   } else if (app.hasProfile === false) {
     appMode = 'speed';
   } else {
-    appMode = app.overrideMode || state.dexoptMode;
+    appMode = state.dexoptMode;
   }
-  const isSpeedOverride = appMode === 'speed';
+  const isSpeedOverride = app.hasProfile === false && appMode === 'speed';
 
   // System vs User App badge
   const typeBadge = app.isSystem
