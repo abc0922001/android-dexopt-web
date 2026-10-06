@@ -55,3 +55,22 @@ test('main.js contains Fast AOT workflow methods and handlers', () => {
   assert.ok(mainJs.includes('function showFastAotResultModal'), 'main.js should define showFastAotResultModal');
   assert.ok(mainJs.includes('force: false'), 'Fast AOT must compile with force: false');
 });
+
+test('Fast AOT modal in index.html contains speed and speed-profile options', () => {
+  const html = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf-8');
+
+  assert.ok(html.includes('name="fastAotMode"'), 'index.html must have fastAotMode radio options');
+  assert.ok(html.includes('value="speed"'), 'index.html must offer speed mode option');
+  assert.ok(html.includes('value="speed-profile"'), 'index.html must offer speed-profile mode option');
+  assert.ok(html.includes('id="fastAotCommandPreview"'), 'index.html must have fastAotCommandPreview');
+  assert.ok(html.includes('id="fastAotModalSubtitle"'), 'index.html must have fastAotModalSubtitle');
+  assert.ok(html.includes('id="fastAotResultSubtitle"'), 'index.html must have fastAotResultSubtitle');
+});
+
+test('main.js supports speed-profile in Fast AOT workflow', () => {
+  const mainJs = fs.readFileSync(path.join(rootDir, 'src/main.js'), 'utf-8');
+
+  assert.ok(mainJs.includes('fastAotMode: \'speed\''), 'main.js state must track fastAotMode');
+  assert.ok(mainJs.includes('function updateFastAotModalMode'), 'main.js should define updateFastAotModalMode');
+  assert.ok(mainJs.includes('await refreshAppStatuses(targetMode)'), 'Fast AOT should refresh app statuses using targetMode');
+});

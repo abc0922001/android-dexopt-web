@@ -20,6 +20,7 @@ const state = {
   isBgDexoptRunning: false,
   isBatchRunning: false,
   batchTargetMode: 'speed',
+  fastAotMode: 'speed',
   pendingForceStop: null, // null | { mode: 'single', packageName, displayName } | { mode: 'batch' }
   logDrawerOpen: false,
   logs: [],
@@ -80,12 +81,15 @@ const el = {
   btnConfirmForceStopModal: document.getElementById('btnConfirmForceStopModal'),
 
   fastAotConfirmModal: document.getElementById('fastAotConfirmModal'),
+  fastAotModalSubtitle: document.getElementById('fastAotModalSubtitle'),
+  fastAotCommandPreview: document.getElementById('fastAotCommandPreview'),
   fastAotCandidateCount: document.getElementById('fastAotCandidateCount'),
   fastAotPreviewList: document.getElementById('fastAotPreviewList'),
   btnCancelFastAotModal: document.getElementById('btnCancelFastAotModal'),
   btnConfirmFastAotModal: document.getElementById('btnConfirmFastAotModal'),
 
   fastAotResultModal: document.getElementById('fastAotResultModal'),
+  fastAotResultSubtitle: document.getElementById('fastAotResultSubtitle'),
   fastAotMetricTotal: document.getElementById('fastAotMetricTotal'),
   fastAotMetricSuccess: document.getElementById('fastAotMetricSuccess'),
   fastAotMetricFailed: document.getElementById('fastAotMetricFailed'),
@@ -945,7 +949,17 @@ function getVerifyApps() {
   return allApps.filter((a) => !a.isCannotAot && (a.status || '').toLowerCase() === 'verify');
 }
 
-function openFastAotModal() {
+function updateFastAotModalMode(mode) {
+  state.fastAotMode = mode;
+  if (el.fastAotModalSubtitle) {
+    el.fastAotModalSubtitle.textContent = `僅針對狀態為 verify 的應用程式執行 ${mode} 編譯`;
+  }
+  if (el.fastAotCommandPreview) {
+    el.fastAotCommandPreview.textContent = `cmd package compile -m ${mode}`;
+  }
+}
+
+function openFastAotModal(initialMode) {
   if (state.isBatchRunning || state.isBgDexoptRunning) return;
   if (queueManager.pendingCount > 0) {
     showToast('單一佇列進行中', '目前尚有單一 App AOT 佇列正在執行中，請等待完成後再啟動快速 AOT。', 'warning');
@@ -957,6 +971,15 @@ function openFastAotModal() {
     showToast('無需最佳化', '目前所有支援的應用程式皆已完成編譯，沒有 status=verify 的待處理項目！', 'info');
     return;
   }
+
+  const modeToUse = (typeof initialMode === 'string' ? initialMode : null) || state.fastAotMode || 'speed';
+  state.fastAotMode = modeToUse;
+
+  const targetRadio = document.querySelector(`input[name="fastAotMode"][value="${modeToUse}"]`);
+  if (targetRadio) {
+    targetRadio.checked = true;
+  }
+  updateFastAotModalMode(modeToUse);
 
   if (el.fastAotCandidateCount) {
     el.fastAotCandidateCount.textContent = `${candidates.length} 個`;
@@ -995,12 +1018,18 @@ async function handleStartFastAot() {
     return;
   }
 
+  const selectedRadio = document.querySelector('input[name="fastAotMode"]:checked');
+  const targetMode = selectedRadio ? selectedRadio.value : (state.fastAotMode || 'speed');
+  state.fastAotMode = targetMode;
+
   state.isBatchRunning = true;
   setLogDrawer(true);
 
   // UI state updates
   el.batchProgressBarContainer?.classList.remove('hidden');
-  if (el.batchProgressTitle) el.batchProgressTitle.textContent = '快速 AOT 最佳化進行中 (僅 verify / 無 -f)';
+  if (el.batchProgressTitle) {
+    el.batchProgressTitle.textContent = `快速 AOT 最佳化進行中 (僅 verify / ${targetMode} / 無 -f)`;
+  }
   el.btnFastAot?.setAttribute('disabled', 'true');
   el.btnBatchSpeed?.setAttribute('disabled', 'true');
   el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
@@ -1012,7 +1041,7 @@ async function handleStartFastAot() {
   const startTime = Date.now();
   const results = [];
 
-  appendTerminalLog(`\n========== 開始快速 AOT 模式 (目標: status=verify, 模式: speed, 無 -f 旗標, 總數: ${candidates.length}) ==========\n`);
+  appendTerminalLog(`\n========== 開始快速 AOT 模式 (目標: status=verify, 模式: ${targetMode}, 無 -f 旗標, 總數: ${candidates.length}) ==========\n`);
 
   for (let i = 0; i < candidates.length; i++) {
     if (!state.isBatchRunning) {
@@ -1036,7 +1065,7 @@ async function handleStartFastAot() {
 
     const itemStartTime = Date.now();
     try {
-      const updated = await adbController.compileApp(app.packageName, 'speed', {
+      const updated = await adbController.compileApp(app.packageName, targetMode, {
         onOutput: (chunk) => appendTerminalLog(chunk),
         skipQueryStatus: true,
         force: false, // Issue #3 requirement: 不加 -f
@@ -1072,10 +1101,10 @@ async function handleStartFastAot() {
 
   const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
   const wasCancelled = !state.isBatchRunning;
-  appendTerminalLog(`\n========== 快速 AOT 模式${wasCancelled ? '已中斷' : '結束'} (成功: ${successCount}, 失敗: ${failedCount}, 總耗時: ${totalDuration}s) ==========\n`);
+  appendTerminalLog(`\n========== 快速 AOT 模式${wasCancelled ? '已中斷' : '結束'} (模式: ${targetMode}, 成功: ${successCount}, 失敗: ${failedCount}, 總耗時: ${totalDuration}s) ==========\n`);
 
   // Refresh status of all apps once at the end
-  await refreshAppStatuses('speed');
+  await refreshAppStatuses(targetMode);
 
   state.isBatchRunning = false;
   el.btnFastAot?.removeAttribute('disabled');
@@ -1098,14 +1127,22 @@ async function handleStartFastAot() {
     duration: `${totalDuration}s`,
     results,
     wasCancelled,
+    mode: targetMode,
   });
 }
 
-function showFastAotResultModal({ total, success, failed, duration, results, wasCancelled }) {
+function showFastAotResultModal({ total, success, failed, duration, results, wasCancelled, mode }) {
   if (el.fastAotMetricTotal) el.fastAotMetricTotal.textContent = `${total}`;
   if (el.fastAotMetricSuccess) el.fastAotMetricSuccess.textContent = `${success}`;
   if (el.fastAotMetricFailed) el.fastAotMetricFailed.textContent = `${failed}`;
   if (el.fastAotMetricDuration) el.fastAotMetricDuration.textContent = duration;
+
+  if (el.fastAotResultSubtitle) {
+    const modeText = mode || 'speed';
+    el.fastAotResultSubtitle.textContent = wasCancelled
+      ? `快速 AOT ${modeText} 編譯已由使用者中斷 (${success}/${total} 完成)`
+      : `已完成所有 verify 應用的 ${modeText} 編譯與狀態同步`;
+  }
 
   if (el.fastAotResultList) {
     el.fastAotResultList.innerHTML = results
@@ -1429,6 +1466,13 @@ el.btnFastAot?.addEventListener('click', openFastAotModal);
 el.btnCancelFastAotModal?.addEventListener('click', closeFastAotModal);
 el.btnConfirmFastAotModal?.addEventListener('click', handleStartFastAot);
 el.btnCloseFastAotResultModal?.addEventListener('click', closeFastAotResultModal);
+document.querySelectorAll('input[name="fastAotMode"]').forEach((radio) => {
+  radio.addEventListener('change', (e) => {
+    if (e.target.checked) {
+      updateFastAotModalMode(e.target.value);
+    }
+  });
+});
 
 /* ---------------- Batch Compile Listeners ---------------- */
 
