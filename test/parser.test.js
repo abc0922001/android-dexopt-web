@@ -299,5 +299,71 @@ Activity Resolver Table:
   assert.ok(general.some((a) => a.packageName === 'com.android.settings'));
 });
 
+test('parseUsageStats correctly handles totalTimeUsed and prevents fake 1m for zero usage (Issue #6)', () => {
+  const sample = `
+  package="tw.goodlife.a_gas" totalTimeUsed="00:00" lastTime="2026-10-06"
+  package="com.activitymanager" totalTimeUsed="00:00:00" lastTime="2026-10-06"
+  package="com.unused.zero" totalTime="0" lastTime="2026-10-06"
+  package="com.google.android.youtube" totalTimeUsed="01:23:45" lastTime="2026-10-06"
+  package="com.spotify.music" totalTimeVisible="35m" lastTime="2026-10-06"
+  package="org.telegram.messenger" totalTime=12345678 lastTime=98765432
+  package="com.android.chrome" timeActive="45000ms" lastTime="2026-10-06"
+  `;
+
+  const usageMap = parseUsageStats(sample);
+
+  // Unused or 0-duration apps MUST NOT be in usageMap or set to 60000ms (1m)
+  assert.strictEqual(usageMap.has('tw.goodlife.a_gas'), false, '00:00 must not be treated as active usage');
+  assert.strictEqual(usageMap.has('com.activitymanager'), false, '00:00:00 must not be treated as active usage');
+  assert.strictEqual(usageMap.has('com.unused.zero'), false, '0 must not be treated as active usage');
+
+  // Real usage must be parsed accurately
+  assert.ok(usageMap.has('com.google.android.youtube'));
+  assert.strictEqual(usageMap.get('com.google.android.youtube').foregroundMs, (1 * 3600 + 23 * 60 + 45) * 1000);
+
+  assert.ok(usageMap.has('com.spotify.music'));
+  assert.strictEqual(usageMap.get('com.spotify.music').foregroundMs, 35 * 60000);
+
+  assert.ok(usageMap.has('org.telegram.messenger'));
+  assert.strictEqual(usageMap.get('org.telegram.messenger').foregroundMs, 12345678);
+
+  assert.ok(usageMap.has('com.android.chrome'));
+  assert.strictEqual(usageMap.get('com.android.chrome').foregroundMs, 45000);
+});
+
+test('parseDurationToMs properly distinguishes ms units from minutes', () => {
+  assert.strictEqual(parseDurationToMs('15000ms'), 15000);
+  assert.strictEqual(parseDurationToMs('15m'), 900000);
+  assert.strictEqual(parseDurationToMs('1h 15m'), 4500000);
+  assert.strictEqual(parseDurationToMs('00:00'), 0);
+  assert.strictEqual(parseDurationToMs('00:00:00'), 0);
+  assert.strictEqual(parseDurationToMs('0'), 0);
+});
+
+test('classifyApps does not format 0 foregroundMs into fake 1m', () => {
+  const pkgList = [
+    { packageName: 'tw.goodlife.a_gas', path: '/data/app/agas.apk', isSystem: false },
+    { packageName: 'com.activitymanager', path: '/data/app/am.apk', isSystem: false },
+    { packageName: 'com.google.android.youtube', path: '/data/app/yt.apk', isSystem: false },
+  ];
+  const usageMap = new Map([
+    ['com.google.android.youtube', { foregroundMs: 3600000 }], // 1 hour
+  ]);
+  const launcherSet = new Set(['tw.goodlife.a_gas', 'com.activitymanager', 'com.google.android.youtube']);
+  const dexoptMap = new Map();
+
+  const { frequentlyUsed } = classifyApps(pkgList, usageMap, launcherSet, dexoptMap);
+
+  const yt = frequentlyUsed.find((a) => a.packageName === 'com.google.android.youtube');
+  assert.strictEqual(yt.usageTimeFormatted, '1h');
+
+  const agas = frequentlyUsed.find((a) => a.packageName === 'tw.goodlife.a_gas');
+  // agas has 0 usage, so usageTimeFormatted MUST be empty, NOT '1m'
+  assert.strictEqual(agas.usageTimeFormatted, '');
+
+  const am = frequentlyUsed.find((a) => a.packageName === 'com.activitymanager');
+  assert.strictEqual(am.usageTimeFormatted, '');
+});
+
 
 

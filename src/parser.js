@@ -51,6 +51,12 @@ export function parseDurationToMs(val) {
     return parseInt(val, 10);
   }
 
+  // If ends with ms (e.g. "12345ms")
+  const msMatch = val.match(/^(\d+)\s*ms$/i);
+  if (msMatch) {
+    return parseInt(msMatch[1], 10);
+  }
+
   // If HH:MM:SS or MM:SS
   if (val.includes(':')) {
     const parts = val.split(':').map((p) => parseInt(p, 10) || 0);
@@ -61,10 +67,10 @@ export function parseDurationToMs(val) {
     }
   }
 
-  // If human readable: 1h23m or 45s
+  // If human readable: 1h23m or 45s (ensure m doesn't match ms)
   let ms = 0;
   const hMatch = val.match(/(\d+)\s*h/i);
-  const mMatch = val.match(/(\d+)\s*m/i);
+  const mMatch = val.match(/(\d+)\s*m(?!s)/i);
   const sMatch = val.match(/(\d+)\s*s/i);
 
   if (hMatch) ms += parseInt(hMatch[1], 10) * 3600000;
@@ -110,21 +116,16 @@ export function parseUsageStats(text) {
 
     const pkgMatch = line.match(/package[=:"'\s]+([a-zA-Z0-9_\.]+)/i) ||
                      line.match(/([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+)\s+(?:totalTime|time)/i);
-    const timeMatch = line.match(/(?:TOTAL_TIME_IN_FOREGROUND|totalTimeInForeground|totalTimeActive|totalTime|timeActive)[=:"'\s]+([0-9a-zA-Z\:\s]+)/i);
+    const timeMatch = line.match(/(?:TOTAL_TIME_IN_FOREGROUND|totalTimeInForeground|totalTimeUsed|totalTimeVisible|totalTimeActive|totalTime|timeActive)\s*[=:]\s*(?:"([^"]+)"|'([^']+)'|([0-9a-zA-Z:+]+))/i);
 
     if (pkgMatch && pkgMatch[1]) {
       const pkg = pkgMatch[1];
       if (!pkg.includes('.')) continue;
 
       let ms = 0;
-      let hasExplicitTime = false;
-      if (timeMatch && timeMatch[1]) {
-        hasExplicitTime = true;
-        const cleanTime = timeMatch[1].replace(/["']/g, '').trim();
+      if (timeMatch) {
+        const cleanTime = (timeMatch[1] || timeMatch[2] || timeMatch[3] || '').trim();
         ms = parseDurationToMs(cleanTime);
-      }
-      if (!hasExplicitTime && ms <= 0) {
-        ms = 60000;
       }
 
       if (ms > 0) {
