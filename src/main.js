@@ -865,6 +865,10 @@ function openBatchModal(targetMode) {
   if (el.batchModalTargetMode) {
     el.batchModalTargetMode.textContent = targetMode;
   }
+  const checkedMethod = document.querySelector('input[name="batchMethod"]:checked');
+  if (checkedMethod) {
+    state.batchMethod = checkedMethod.value;
+  }
   updatePillCounts();
   updateBatchModalPreview();
   el.batchConfirmModal?.classList.remove('hidden');
@@ -911,6 +915,7 @@ async function handleStartBatch() {
   // Issue #7: -f -a all packages direct mode
   if (method === 'all_direct') {
     state.isBatchRunning = true;
+    state.batchAbortController = new AbortController();
     setLogDrawer(true);
 
     el.batchProgressBarContainer?.classList.remove('hidden');
@@ -934,8 +939,10 @@ async function handleStartBatch() {
     appendTerminalLog(`⚡ 正由 Android 原生系統接管全機應用最佳化，免除個別通訊延遲，請檢視終端機即時輸出...\n\n`);
 
     let compileErr = null;
+    let compileRes = null;
     try {
-      await adbController.compileAll(targetMode, {
+      compileRes = await adbController.compileAll(targetMode, {
+        signal: state.batchAbortController.signal,
         onOutput: (chunk) => {
           appendTerminalLog(chunk);
           const m = chunk.match(/(?:Compiling|Optimizing|optimizing):\s*([a-zA-Z0-9_.]+)/i);
@@ -946,36 +953,46 @@ async function handleStartBatch() {
       });
     } catch (err) {
       compileErr = err;
-      appendTerminalLog(`❌ 全機 AOT 編譯執行異常: ${err.message}\n`);
+      if (!state.isBatchRunning || adbController._batchCancelled || state.batchAbortController?.signal.aborted) {
+        appendTerminalLog(`\n⚠️ 全機 AOT 編譯任務已由使用者中斷。\n`);
+      } else {
+        appendTerminalLog(`❌ 全機 AOT 編譯執行異常: ${err.message}\n`);
+      }
     }
 
-    const wasCancelled = !state.isBatchRunning;
+    const wasCancelled = !state.isBatchRunning || adbController._batchCancelled || state.batchAbortController?.signal.aborted || compileRes?.exitCode === 130;
     appendTerminalLog(`\n========== 全機 AOT 編譯指令執行${wasCancelled ? '已中斷' : '完畢'}，正在同步裝置最新狀態... ==========\n`);
 
-    if (compileErr) {
-      showToast('全機編譯異常', `執行時發生問題: ${compileErr.message}，正在嘗試同步目前狀態...`, 'error');
-    } else if (wasCancelled) {
-      showToast('全機編譯已中斷', '任務已中斷，正在同步目前狀態...', 'warning');
+    if (wasCancelled) {
+      showToast('全機編譯已中斷', '任務已由使用者中斷，正在同步目前狀態...', 'warning');
+    } else if (compileErr || (compileRes && compileRes.exitCode !== 0)) {
+      const errMsg = compileErr?.message || compileRes?.stderr || `Exit code ${compileRes?.exitCode}`;
+      showToast('全機編譯異常', `執行時發生問題: ${errMsg}，正在嘗試同步目前狀態...`, 'error');
     } else {
       showToast('全機編譯完成', `已成功下達 ${targetMode} (-f -a) 全機編譯，正在同步最新狀態...`, 'info');
     }
 
-    await refreshAppStatuses(targetMode);
+    try {
+      await refreshAppStatuses(targetMode, { wasCancelled });
+    } catch (err) {
+      appendTerminalLog(`⚠️ 狀態更新失敗: ${err.message}\n`);
+    } finally {
+      state.isBatchRunning = false;
+      state.batchAbortController = null;
+      el.batchProgressBar?.classList.remove('animate-pulse');
+      el.btnFastAot?.removeAttribute('disabled');
+      el.btnBatchSpeed?.removeAttribute('disabled');
+      el.btnBatchSpeedProfile?.removeAttribute('disabled');
+      el.btnBatchCheckProfile?.removeAttribute('disabled');
+      el.btnTriggerBgDexopt?.removeAttribute('disabled');
+      el.btnCancelBatch?.classList.add('hidden');
 
-    state.isBatchRunning = false;
-    el.batchProgressBar?.classList.remove('animate-pulse');
-    el.btnFastAot?.removeAttribute('disabled');
-    el.btnBatchSpeed?.removeAttribute('disabled');
-    el.btnBatchSpeedProfile?.removeAttribute('disabled');
-    el.btnBatchCheckProfile?.removeAttribute('disabled');
-    el.btnTriggerBgDexopt?.removeAttribute('disabled');
-    el.btnCancelBatch?.classList.add('hidden');
-
-    setTimeout(() => {
-      if (!state.isBatchRunning) {
-        el.batchProgressBarContainer?.classList.add('hidden');
-      }
-    }, 4000);
+      setTimeout(() => {
+        if (!state.isBatchRunning) {
+          el.batchProgressBarContainer?.classList.add('hidden');
+        }
+      }, 4000);
+    }
     return;
   }
 
@@ -1018,75 +1035,80 @@ async function handleStartBatch() {
 
   appendTerminalLog(`\n========== 開始批次 AOT 編譯 (目標模式: ${targetMode}, 範圍: ${scope}, 總數: ${targetList.length}) ==========\n`);
 
-  for (let i = 0; i < targetList.length; i++) {
-    if (!state.isBatchRunning) {
-      appendTerminalLog(`\n⚠️ 批次編譯已由使用者中斷。\n`);
-      showToast('批次編譯已中斷', `已執行 ${i}/${targetList.length} 個應用程式。`, 'warning');
-      break;
+  try {
+    for (let i = 0; i < targetList.length; i++) {
+      if (!state.isBatchRunning) {
+        appendTerminalLog(`\n⚠️ 批次編譯已由使用者中斷。\n`);
+        showToast('批次編譯已中斷', `已執行 ${i}/${targetList.length} 個應用程式。`, 'warning');
+        break;
+      }
+
+      const app = targetList[i];
+      const pct = Math.round(((i + 1) / targetList.length) * 100);
+
+      if (el.batchProgressCount) el.batchProgressCount.textContent = `[${i + 1}/${targetList.length}] (${pct}%)`;
+      if (el.batchProgressBar) el.batchProgressBar.style.width = `${pct}%`;
+      if (el.batchProgressCurrentApp) el.batchProgressCurrentApp.textContent = `正在編譯 [${i + 1}/${targetList.length}]: ${app.displayName} (${app.packageName})`;
+
+      // Highlight app card
+      const cardBtn = document.querySelector(`[data-package="${app.packageName}"]`);
+      if (cardBtn) {
+        cardBtn.disabled = true;
+        cardBtn.innerHTML = `${ICONS.spinner} <span>編譯中...</span>`;
+      }
+
+      try {
+        const updated = await adbController.compileApp(app.packageName, targetMode, {
+          onOutput: (chunk) => appendTerminalLog(chunk),
+          skipQueryStatus: true,
+        });
+        app.status = updated.status;
+        app.reason = updated.reason;
+        successCount++;
+      } catch (err) {
+        failedCount++;
+        appendTerminalLog(`❌ [${app.packageName}] 編譯失敗: ${err.message}\n`);
+      } finally {
+        // Re-render this app's card in place
+        updateAppCardInDom(app);
+      }
     }
 
-    const app = targetList[i];
-    const pct = Math.round(((i + 1) / targetList.length) * 100);
+    const wasCancelled = !state.isBatchRunning;
+    appendTerminalLog(`\n========== 批次 AOT 編譯${wasCancelled ? '已中斷' : '結束'} (成功: ${successCount}, 失敗: ${failedCount}) ==========\n`);
 
-    if (el.batchProgressCount) el.batchProgressCount.textContent = `[${i + 1}/${targetList.length}] (${pct}%)`;
-    if (el.batchProgressBar) el.batchProgressBar.style.width = `${pct}%`;
-    if (el.batchProgressCurrentApp) el.batchProgressCurrentApp.textContent = `正在編譯 [${i + 1}/${targetList.length}]: ${app.displayName} (${app.packageName})`;
-
-    // Highlight app card
-    const cardBtn = document.querySelector(`[data-package="${app.packageName}"]`);
-    if (cardBtn) {
-      cardBtn.disabled = true;
-      cardBtn.innerHTML = `${ICONS.spinner} <span>編譯中...</span>`;
+    if (!wasCancelled) {
+      showToast('批次編譯完成', `已成功最佳化 ${successCount} 個應用程式，正在同步最新狀態...`, 'info');
+    } else {
+      showToast('批次編譯已中斷', `已執行 ${successCount + failedCount} 個應用程式，正在同步最新狀態...`, 'warning');
     }
 
-    try {
-      const updated = await adbController.compileApp(app.packageName, targetMode, {
-        onOutput: (chunk) => appendTerminalLog(chunk),
-        skipQueryStatus: true,
-      });
-      app.status = updated.status;
-      app.reason = updated.reason;
-      successCount++;
-    } catch (err) {
-      failedCount++;
-      appendTerminalLog(`❌ [${app.packageName}] 編譯失敗: ${err.message}\n`);
-    } finally {
-      // Re-render this app's card in place
-      updateAppCardInDom(app);
-    }
+    // Refresh status of all apps once at the end or upon cancellation
+    await refreshAppStatuses(targetMode, { wasCancelled, isSequential: true });
+  } catch (err) {
+    appendTerminalLog(`⚠️ 批次任務執行異常: ${err.message}\n`);
+  } finally {
+    state.isBatchRunning = false;
+    state.batchAbortController = null;
+    el.btnFastAot?.removeAttribute('disabled');
+    el.btnBatchSpeed?.removeAttribute('disabled');
+    el.btnBatchSpeedProfile?.removeAttribute('disabled');
+    el.btnBatchCheckProfile?.removeAttribute('disabled');
+    el.btnTriggerBgDexopt?.removeAttribute('disabled');
+    el.btnCancelBatch?.classList.add('hidden');
+
+    setTimeout(() => {
+      if (!state.isBatchRunning) {
+        el.batchProgressBarContainer?.classList.add('hidden');
+      }
+    }, 4000);
   }
-
-  const wasCancelled = !state.isBatchRunning;
-  appendTerminalLog(`\n========== 批次 AOT 編譯${wasCancelled ? '已中斷' : '結束'} (成功: ${successCount}, 失敗: ${failedCount}) ==========\n`);
-
-  if (!wasCancelled) {
-    showToast('批次編譯完成', `已成功最佳化 ${successCount} 個應用程式，正在同步最新狀態...`, 'info');
-  } else {
-    showToast('批次編譯已中斷', `已執行 ${successCount + failedCount} 個應用程式，正在同步最新狀態...`, 'warning');
-  }
-
-  // Refresh status of all apps once at the end or upon cancellation
-  await refreshAppStatuses(targetMode);
-
-  state.isBatchRunning = false;
-  el.btnFastAot?.removeAttribute('disabled');
-  el.btnBatchSpeed?.removeAttribute('disabled');
-  el.btnBatchSpeedProfile?.removeAttribute('disabled');
-  el.btnBatchCheckProfile?.removeAttribute('disabled');
-  el.btnTriggerBgDexopt?.removeAttribute('disabled');
-  el.btnCancelBatch?.classList.add('hidden');
-
-  setTimeout(() => {
-    if (!state.isBatchRunning) {
-      el.batchProgressBarContainer?.classList.add('hidden');
-    }
-  }, 4000);
 }
 
 /**
  * Batch re-query Dexopt status for all apps from device and update UI in-place
  */
-async function refreshAppStatuses(targetMode) {
+async function refreshAppStatuses(targetMode, { wasCancelled = false, isSequential = false } = {}) {
   appendTerminalLog('\n[狀態更新] 正在從裝置批次擷取最新 Dexopt 編譯狀態...\n');
   if (el.batchProgressCurrentApp) {
     el.batchProgressCurrentApp.textContent = '正在批次重新取得所有應用程式之最新 Dexopt 狀態...';
@@ -1097,14 +1119,16 @@ async function refreshAppStatuses(targetMode) {
     const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
 
     if (adbController.isDemoMode) {
-      for (const app of allApps) {
-        if (!app.isCannotAot) {
-          app.status = targetMode;
-          app.reason = 'cmdline';
-          if (targetMode === 'speed') {
-            delete app.overrideMode;
-          } else if (targetMode === 'speed-profile') {
-            app.overrideMode = 'speed-profile';
+      if (!isSequential && !wasCancelled) {
+        for (const app of allApps) {
+          if (!app.isCannotAot) {
+            app.status = targetMode;
+            app.reason = 'cmdline';
+            if (targetMode === 'speed') {
+              delete app.overrideMode;
+            } else if (targetMode === 'speed-profile') {
+              app.overrideMode = 'speed-profile';
+            }
           }
         }
       }
@@ -1139,6 +1163,7 @@ async function refreshAppStatuses(targetMode) {
 function handleCancelBatch() {
   if (!state.isBatchRunning) return;
   state.isBatchRunning = false;
+  state.batchAbortController?.abort();
   adbController.cancelBatchCompile();
   if (el.batchProgressCurrentApp) {
     el.batchProgressCurrentApp.textContent = '正在中斷任務，請稍候...';
@@ -1891,6 +1916,11 @@ document.querySelectorAll('input[name="batchMethod"]').forEach((radio) => {
       state.batchMethod = e.target.value;
       updateBatchModalPreview();
     }
+  });
+});
+document.querySelectorAll('input[name="batchScope"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    updateBatchModalPreview();
   });
 });
 

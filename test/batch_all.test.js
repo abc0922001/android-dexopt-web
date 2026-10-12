@@ -97,3 +97,68 @@ test('main.js handles both all_direct and sequential options with preview and st
   assert.ok(mainCode.includes('cmd package compile -m ${targetMode} -f -a'), 'main.js must format preview command');
   assert.ok(mainCode.includes('cancelBatchCompile'), 'main.js must support cancelBatchCompile');
 });
+
+test('adb-controller.js compileAll falls back to pm compile on exitCode 127 / not found without throwing', async () => {
+  const adb = new AdbController();
+  const executedCommands = [];
+
+  adb.exec = async (cmdArray) => {
+    executedCommands.push(cmdArray);
+    if (cmdArray[0] === 'cmd') {
+      // Realistic shell behavior when cmd binary is absent (Android 6 or custom ROM)
+      return { stdout: '', stderr: '/system/bin/sh: cmd: not found\n', exitCode: 127 };
+    }
+    return { stdout: 'Success via pm', stderr: '', exitCode: 0 };
+  };
+
+  const res = await adb.compileAll('speed');
+  assert.strictEqual(executedCommands.length, 2);
+  assert.deepStrictEqual(executedCommands[0], ['cmd', 'package', 'compile', '-m', 'speed', '-f', '-a']);
+  assert.deepStrictEqual(executedCommands[1], ['pm', 'compile', '-m', 'speed', '-f', '-a']);
+  assert.strictEqual(res.stdout, 'Success via pm');
+});
+
+test('adb-controller.js compileAll does NOT fall back to pm compile when user cancels', async () => {
+  const adb = new AdbController();
+  const executedCommands = [];
+
+  adb.exec = async (cmdArray) => {
+    executedCommands.push(cmdArray);
+    if (cmdArray[0] === 'cmd') {
+      // Simulate user clicking cancel while cmd is running
+      adb.cancelBatchCompile();
+      return { stdout: '', stderr: 'Cancelled', exitCode: 130 };
+    }
+    return { stdout: 'Should not run pm', stderr: '', exitCode: 0 };
+  };
+
+  const res = await adb.compileAll('speed');
+  assert.strictEqual(executedCommands.length, 1, 'Must not fallback to pm when batch is cancelled');
+  assert.strictEqual(res.exitCode, 130);
+});
+
+test('adb-controller.js compileAll respects AbortSignal and avoids fallback on abort', async () => {
+  const adb = new AdbController();
+  const executedCommands = [];
+  const controller = new AbortController();
+
+  adb.exec = async (cmdArray, { signal }) => {
+    executedCommands.push(cmdArray);
+    if (cmdArray[0] === 'cmd') {
+      controller.abort();
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  };
+
+  await assert.rejects(
+    async () => {
+      await adb.compileAll('speed', { signal: controller.signal });
+    },
+    { name: 'AbortError' }
+  );
+
+  assert.strictEqual(executedCommands.length, 1, 'Must not execute pm compile after AbortSignal abort');
+});

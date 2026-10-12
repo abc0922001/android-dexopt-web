@@ -221,13 +221,20 @@ export class AdbController {
       };
 
       try {
+        const stdoutStream = process.stdout ?? process.output;
         const [stdout, stderr] = await Promise.all([
-          readStream(process.stdout, false),
+          readStream(stdoutStream, false),
           readStream(process.stderr, true),
         ]);
 
-        const exitCode = await process.exited;
+        const rawExitCode = typeof process.exited === 'number' ? process.exited : await process.exited;
+        const exitCode = typeof rawExitCode === 'number' ? rawExitCode : 0;
         return { stdout, stderr, exitCode };
+      } catch (err) {
+        if (this._batchCancelled || signal?.aborted) {
+          return { stdout: '', stderr: 'Cancelled', exitCode: 130 };
+        }
+        throw err;
       } finally {
         this.currentProcess = null;
       }
@@ -434,19 +441,42 @@ export class AdbController {
    * @param {function} [options.onOutput]
    * @param {AbortSignal} [options.signal]
    */
-  async compileAll(mode = 'speed', { onOutput, signal } = {}) {
+  async compileAll(mode = 'speed', { onOutput = () => {}, signal } = {}) {
+    this._batchCancelled = false;
     this.log('全機最佳化', `正在對全機所有應用程式執行 ${mode} 編譯 (cmd package compile -m ${mode} -f -a)...`);
     
     if (this.isDemoMode) {
       return this._mockCompileAll(mode, { onOutput });
     }
 
+    let res;
+    let shouldFallback = false;
     try {
-      return await this.exec(['cmd', 'package', 'compile', '-m', mode, '-f', '-a'], { onOutput, signal });
+      res = await this.exec(['cmd', 'package', 'compile', '-m', mode, '-f', '-a'], { onOutput, signal });
+      if (res && res.exitCode !== 0) {
+        const combined = `${res.stdout || ''} ${res.stderr || ''}`.toLowerCase();
+        if (combined.includes('not found') || combined.includes('inaccessible or not found') || res.exitCode === 127) {
+          shouldFallback = true;
+        }
+      }
     } catch (err) {
-      this.log('警告', `cmd package 失敗，改用舊版 pm compile 指令備援: ${err.message}`);
+      if (this._batchCancelled || signal?.aborted) {
+        throw err;
+      }
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('not found') || msg.includes('cmd')) {
+        shouldFallback = true;
+      } else {
+        throw err;
+      }
+    }
+
+    if (shouldFallback && !this._batchCancelled && !signal?.aborted) {
+      this.log('警告', 'cmd package 失敗或不存在，改用舊版 pm compile 指令備援...');
       return await this.exec(['pm', 'compile', '-m', mode, '-f', '-a'], { onOutput, signal });
     }
+
+    return res;
   }
 
   /**
