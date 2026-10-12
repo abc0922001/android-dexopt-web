@@ -21,6 +21,7 @@ const state = {
   isBgDexoptRunning: false,
   isBatchRunning: false,
   batchTargetMode: 'speed',
+  batchMethod: 'all_direct', // 'all_direct' (-f -a) | 'sequential'
   fastAotMode: 'speed',
   pendingForceStop: null, // null | { mode: 'single', packageName, displayName } | { mode: 'batch' }
   logDrawerOpen: false,
@@ -75,11 +76,15 @@ const el = {
 
   batchConfirmModal: document.getElementById('batchConfirmModal'),
   batchModalTargetMode: document.getElementById('batchModalTargetMode'),
+  batchCommandPreview: document.getElementById('batchCommandPreview'),
+  batchDirectNotice: document.getElementById('batchDirectNotice'),
+  batchScopeContainer: document.getElementById('batchScopeContainer'),
   batchScopeUserCount: document.getElementById('batchScopeUserCount'),
   batchScopeAllCount: document.getElementById('batchScopeAllCount'),
   batchScopeSystemCount: document.getElementById('batchScopeSystemCount'),
   btnCancelBatchModal: document.getElementById('btnCancelBatchModal'),
   btnConfirmBatchModal: document.getElementById('btnConfirmBatchModal'),
+  btnConfirmBatchText: document.getElementById('btnConfirmBatchText'),
 
   forceStopConfirmModal: document.getElementById('forceStopConfirmModal'),
   forceStopModalTitle: document.getElementById('forceStopModalTitle'),
@@ -861,7 +866,35 @@ function openBatchModal(targetMode) {
     el.batchModalTargetMode.textContent = targetMode;
   }
   updatePillCounts();
+  updateBatchModalPreview();
   el.batchConfirmModal?.classList.remove('hidden');
+}
+
+function updateBatchModalPreview() {
+  const targetMode = state.batchTargetMode || 'speed';
+  const method = state.batchMethod || 'all_direct';
+
+  if (el.batchCommandPreview) {
+    if (method === 'all_direct') {
+      el.batchCommandPreview.textContent = `cmd package compile -m ${targetMode} -f -a`;
+    } else {
+      el.batchCommandPreview.textContent = `cmd package compile -m ${targetMode} -f <package>`;
+    }
+  }
+
+  if (method === 'all_direct') {
+    el.batchDirectNotice?.classList.remove('hidden');
+    el.batchScopeContainer?.classList.add('hidden');
+    if (el.btnConfirmBatchText) {
+      el.btnConfirmBatchText.textContent = '開始極速全機編譯 (-f -a)';
+    }
+  } else {
+    el.batchDirectNotice?.classList.add('hidden');
+    el.batchScopeContainer?.classList.remove('hidden');
+    if (el.btnConfirmBatchText) {
+      el.btnConfirmBatchText.textContent = '開始循序逐一編譯';
+    }
+  }
 }
 
 function closeBatchModal() {
@@ -873,6 +906,80 @@ async function handleStartBatch() {
   if (state.isBatchRunning) return;
 
   const targetMode = state.batchTargetMode || 'speed';
+  const method = state.batchMethod || 'all_direct';
+
+  // Issue #7: -f -a all packages direct mode
+  if (method === 'all_direct') {
+    state.isBatchRunning = true;
+    setLogDrawer(true);
+
+    el.batchProgressBarContainer?.classList.remove('hidden');
+    el.btnFastAot?.setAttribute('disabled', 'true');
+    el.btnBatchSpeed?.setAttribute('disabled', 'true');
+    el.btnBatchSpeedProfile?.setAttribute('disabled', 'true');
+    el.btnBatchCheckProfile?.setAttribute('disabled', 'true');
+    el.btnTriggerBgDexopt?.setAttribute('disabled', 'true');
+    el.btnCancelBatch?.classList.remove('hidden');
+
+    if (el.batchProgressCount) el.batchProgressCount.textContent = '全機極速模式 (-f -a)';
+    if (el.batchProgressBar) {
+      el.batchProgressBar.style.width = '100%';
+      el.batchProgressBar.classList.add('animate-pulse');
+    }
+    if (el.batchProgressCurrentApp) {
+      el.batchProgressCurrentApp.textContent = `正在執行全機極速最佳化: cmd package compile -m ${targetMode} -f -a`;
+    }
+
+    appendTerminalLog(`\n========== 開始極速全機 AOT 編譯 (cmd package compile -m ${targetMode} -f -a) ==========\n`);
+    appendTerminalLog(`⚡ 正由 Android 原生系統接管全機應用最佳化，免除個別通訊延遲，請檢視終端機即時輸出...\n\n`);
+
+    let compileErr = null;
+    try {
+      await adbController.compileAll(targetMode, {
+        onOutput: (chunk) => {
+          appendTerminalLog(chunk);
+          const m = chunk.match(/(?:Compiling|Optimizing|optimizing):\s*([a-zA-Z0-9_.]+)/i);
+          if (m && el.batchProgressCurrentApp) {
+            el.batchProgressCurrentApp.textContent = `正在編譯: ${m[1]}`;
+          }
+        },
+      });
+    } catch (err) {
+      compileErr = err;
+      appendTerminalLog(`❌ 全機 AOT 編譯執行異常: ${err.message}\n`);
+    }
+
+    const wasCancelled = !state.isBatchRunning;
+    appendTerminalLog(`\n========== 全機 AOT 編譯指令執行${wasCancelled ? '已中斷' : '完畢'}，正在同步裝置最新狀態... ==========\n`);
+
+    if (compileErr) {
+      showToast('全機編譯異常', `執行時發生問題: ${compileErr.message}，正在嘗試同步目前狀態...`, 'error');
+    } else if (wasCancelled) {
+      showToast('全機編譯已中斷', '任務已中斷，正在同步目前狀態...', 'warning');
+    } else {
+      showToast('全機編譯完成', `已成功下達 ${targetMode} (-f -a) 全機編譯，正在同步最新狀態...`, 'info');
+    }
+
+    await refreshAppStatuses(targetMode);
+
+    state.isBatchRunning = false;
+    el.batchProgressBar?.classList.remove('animate-pulse');
+    el.btnFastAot?.removeAttribute('disabled');
+    el.btnBatchSpeed?.removeAttribute('disabled');
+    el.btnBatchSpeedProfile?.removeAttribute('disabled');
+    el.btnBatchCheckProfile?.removeAttribute('disabled');
+    el.btnTriggerBgDexopt?.removeAttribute('disabled');
+    el.btnCancelBatch?.classList.add('hidden');
+
+    setTimeout(() => {
+      if (!state.isBatchRunning) {
+        el.batchProgressBarContainer?.classList.add('hidden');
+      }
+    }, 4000);
+    return;
+  }
+
+  // Sequential mode
   const scopeEl = document.querySelector('input[name="batchScope"]:checked');
   const scope = scopeEl ? scopeEl.value : 'user';
 
@@ -989,20 +1096,34 @@ async function refreshAppStatuses(targetMode) {
     const dexoptMap = await adbController.getBatchDexoptStatusMap();
     const allApps = [...state.apps.frequentlyUsed, ...state.apps.general, ...state.apps.cannotAot];
 
-    for (const app of allApps) {
-      const info = dexoptMap.get(app.packageName);
-      if (info) {
-        app.status = info.status;
-        app.reason = info.reason;
-        if (info.hasCode === false) {
-          app.hasCode = false;
+    if (adbController.isDemoMode) {
+      for (const app of allApps) {
+        if (!app.isCannotAot) {
+          app.status = targetMode;
+          app.reason = 'cmdline';
+          if (targetMode === 'speed') {
+            delete app.overrideMode;
+          } else if (targetMode === 'speed-profile') {
+            app.overrideMode = 'speed-profile';
+          }
         }
+      }
+    } else {
+      for (const app of allApps) {
+        const info = dexoptMap.get(app.packageName);
+        if (info) {
+          app.status = info.status;
+          app.reason = info.reason;
+          if (info.hasCode === false) {
+            app.hasCode = false;
+          }
 
-        // If batch was speed-profile but app fell back to verify, switch button to speed
-        if (targetMode === 'speed-profile' && app.status === 'verify') {
-          app.overrideMode = 'speed';
-        } else if (targetMode === 'speed' && app.status === 'speed') {
-          delete app.overrideMode;
+          // If batch was speed-profile but app fell back to verify, switch button to speed
+          if (targetMode === 'speed-profile' && app.status === 'verify') {
+            app.overrideMode = 'speed';
+          } else if (targetMode === 'speed' && app.status === 'speed') {
+            delete app.overrideMode;
+          }
         }
       }
     }
@@ -1018,8 +1139,9 @@ async function refreshAppStatuses(targetMode) {
 function handleCancelBatch() {
   if (!state.isBatchRunning) return;
   state.isBatchRunning = false;
+  adbController.cancelBatchCompile();
   if (el.batchProgressCurrentApp) {
-    el.batchProgressCurrentApp.textContent = '正在中斷任務，請稍候目前 App 完成...';
+    el.batchProgressCurrentApp.textContent = '正在中斷任務，請稍候...';
   }
 }
 
@@ -1763,6 +1885,14 @@ el.btnCancelBatchModal?.addEventListener('click', closeBatchModal);
 el.btnConfirmBatchModal?.addEventListener('click', handleStartBatch);
 el.btnCancelBatch?.addEventListener('click', handleCancelBatch);
 el.btnStopBatchProgress?.addEventListener('click', handleCancelBatch);
+document.querySelectorAll('input[name="batchMethod"]').forEach((radio) => {
+  radio.addEventListener('change', (e) => {
+    if (e.target.checked) {
+      state.batchMethod = e.target.value;
+      updateBatchModalPreview();
+    }
+  });
+});
 
 /* ---------------- Force Stop Listeners ---------------- */
 

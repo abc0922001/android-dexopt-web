@@ -33,7 +33,7 @@
             <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
               Android Dexopt Studio Web
             </h1>
-            <span id="appVersion" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20 shadow-xs" title="軟體版本">v1.1.2</span>
+            <span id="appVersion" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20 shadow-xs" title="軟體版本">v1.2.0</span>
           </div>
           <p class="text-xs text-slate-500 dark:text-slate-400">
             WebUSB ART AOT Compiler & Package Manager
@@ -428,8 +428,53 @@
         </p>
       </div>
 
-      <!-- Target Scope Selection (分類系統與用戶安裝) -->
+      <!-- Execution Method Selection (Issue #7: -f -a option) -->
       <div class="space-y-2">
+        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+          選擇編譯執行方式：
+        </label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+          <label class="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors has-[:checked]:border-cyan-500 has-[:checked]:bg-cyan-500/5">
+            <input type="radio" name="batchMethod" value="all_direct" checked class="mt-0.5 text-cyan-500 focus:ring-cyan-500" />
+            <div class="flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-slate-900 dark:text-slate-100">極速全機模式 (-f -a)</span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">推薦</span>
+              </div>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                執行單一原生指令一次編譯全機所有應用，免除個別通訊延遲，速度最快。
+              </p>
+            </div>
+          </label>
+
+          <label class="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors has-[:checked]:border-cyan-500 has-[:checked]:bg-cyan-500/5">
+            <input type="radio" name="batchMethod" value="sequential" class="mt-0.5 text-cyan-500 focus:ring-cyan-500" />
+            <div class="flex-1">
+              <span class="font-bold text-slate-900 dark:text-slate-100">循序逐一編譯</span>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                依自訂範圍逐一下達單一 App 指令，可即時查看個別應用進度與卡片動態。
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Command Preview Box -->
+      <div class="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs">
+        <span class="text-slate-500 dark:text-slate-400 shrink-0 font-medium">預覽執行指令：</span>
+        <code id="batchCommandPreview" class="font-mono text-cyan-600 dark:text-cyan-400 font-bold break-all text-right">cmd package compile -m speed -f -a</code>
+      </div>
+
+      <!-- Direct mode explanation notice (shown when all_direct is selected) -->
+      <div id="batchDirectNotice" class="text-xs p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-950 dark:text-cyan-200 flex items-start gap-2">
+        <svg class="w-4 h-4 text-cyan-500 shrink-0 mt-0.5 fill-current" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+        <span class="leading-relaxed">
+          <strong>全機模式提示：</strong>原生 <code class="font-mono px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">-a</code> 旗標將直接由 Android 系統原生編譯<strong>全機所有應用程式</strong>（含用戶安裝與系統應用），無需手動挑選範圍。
+        </span>
+      </div>
+
+      <!-- Target Scope Selection (分類系統與用戶安裝，在循序模式下顯示) -->
+      <div id="batchScopeContainer" class="hidden space-y-2">
         <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
           選擇編譯對象範圍 (Scope)：
         </label>
@@ -475,7 +520,7 @@
           取消
         </button>
         <button id="btnConfirmBatchModal" class="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-md shadow-cyan-500/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95">
-          <span>確定開始編譯</span>
+          <span id="btnConfirmBatchText">開始極速全機編譯 (-f -a)</span>
         </button>
       </div>
     </div>

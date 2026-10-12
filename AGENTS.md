@@ -33,6 +33,7 @@ Android 應用程式打包為 APK 時內含 Dalvik Bytecode (`.dex`)。Android R
 - 單一 App 編譯：`cmd package compile -m <mode> [-f] <package>`
   - `-f` (force)：強制重新編譯（即使系統認為已是該狀態）。
   - 無 `-f`（快速 AOT 模式）：若 App 已滿足條件則跳過，專門針對 `verify` 快速拉升至 `speed` 或 `speed-profile`。
+- 全機極速批次編譯：`cmd package compile -m <mode> -f -a`（全機原生最佳化，最高效迅速，免除單一 App 來回通訊延遲，Issue #7）。
 - 系統全局背景最佳化：`cmd package bg-dexopt-job`（舊版系統 fallback 為 `pm bg-dexopt-job`）。
 - 中斷全局背景最佳化：`cmd package cancel-bg-dexopt-job`。
 - 強制停止應用：`am force-stop <package>`（強制終止 App 背景進程，確保下次啟動立即載入最新 AOT 機器碼）。
@@ -71,6 +72,7 @@ android-dexopt-web/
 │   ├── parser.test.js      # Parser、分類演算法、排序演算法測試
 │   ├── layout.test.js      # 平板/桌面斷點排版與 Headless Chrome 容器查詢計算測試
 │   ├── fastaot.test.js     # 快速 AOT 模式 (無 -f、僅 verify、支援 speed 與 speed-profile) 測試
+│   ├── batch_all.test.js   # 全機極速批次編譯 (-f -a) 選項、指令生成與執行測試 (Issue #7)
 │   ├── queue.test.js       # AOT 任務佇列循序執行、取消等待、去重測試
 │   ├── offline.test.js     # PWA、Service Worker 快取策略與離線註冊測試
 │   ├── profile.test.js     # Profile 熱點檢查、UI 與多軌檢測相容性測試

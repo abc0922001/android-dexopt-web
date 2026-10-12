@@ -185,7 +185,7 @@ export class AdbController {
   /**
    * Execute command via shell protocol or fallback
    */
-  async exec(commandArray, { onOutput } = {}) {
+  async exec(commandArray, { onOutput, signal } = {}) {
     const cmdStr = Array.isArray(commandArray) ? commandArray.join(' ') : commandArray;
     this.log('執行指令', cmdStr);
 
@@ -200,7 +200,8 @@ export class AdbController {
     const spawner = this.subprocess.shellProtocol ?? this.subprocess.noneProtocol;
 
     if (onOutput) {
-      const process = await spawner.spawn(commandArray);
+      const process = await spawner.spawn(commandArray, signal);
+      this.currentProcess = process;
       
       const readStream = async (stream, isError = false) => {
         if (!stream) return '';
@@ -219,13 +220,17 @@ export class AdbController {
         return full;
       };
 
-      const [stdout, stderr] = await Promise.all([
-        readStream(process.stdout, false),
-        readStream(process.stderr, true),
-      ]);
+      try {
+        const [stdout, stderr] = await Promise.all([
+          readStream(process.stdout, false),
+          readStream(process.stderr, true),
+        ]);
 
-      const exitCode = await process.exited;
-      return { stdout, stderr, exitCode };
+        const exitCode = await process.exited;
+        return { stdout, stderr, exitCode };
+      } finally {
+        this.currentProcess = null;
+      }
     } else {
       const result = await spawner.spawnWaitText(commandArray);
       return typeof result === 'string' ? { stdout: result, stderr: '', exitCode: 0 } : result;
@@ -419,6 +424,45 @@ export class AdbController {
     
     this.log('完成', `[${packageName}] 已更新為 status=${updated.status} reason=${updated.reason}`);
     return updated;
+  }
+
+  /**
+   * Optimize all applications on device using -f -a (Issue #7)
+   * Executes `cmd package compile -m <mode> -f -a`
+   * @param {'speed'|'speed-profile'} mode
+   * @param {object} [options]
+   * @param {function} [options.onOutput]
+   * @param {AbortSignal} [options.signal]
+   */
+  async compileAll(mode = 'speed', { onOutput, signal } = {}) {
+    this.log('全機最佳化', `正在對全機所有應用程式執行 ${mode} 編譯 (cmd package compile -m ${mode} -f -a)...`);
+    
+    if (this.isDemoMode) {
+      return this._mockCompileAll(mode, { onOutput });
+    }
+
+    try {
+      return await this.exec(['cmd', 'package', 'compile', '-m', mode, '-f', '-a'], { onOutput, signal });
+    } catch (err) {
+      this.log('警告', `cmd package 失敗，改用舊版 pm compile 指令備援: ${err.message}`);
+      return await this.exec(['pm', 'compile', '-m', mode, '-f', '-a'], { onOutput, signal });
+    }
+  }
+
+  /**
+   * Cancel active batch compile process (both real and demo modes)
+   */
+  cancelBatchCompile() {
+    this._batchCancelled = true;
+    if (this.currentProcess) {
+      try {
+        this.currentProcess.kill?.();
+      } catch (e) {
+        // ignore
+      }
+      this.currentProcess = null;
+    }
+    this.log('全機最佳化', '已下達中斷批次最佳化指令。');
   }
 
   /**
@@ -677,6 +721,32 @@ export class AdbController {
       reason: 'cmdline',
       hasCode: true,
     };
+  }
+
+  async _mockCompileAll(mode, { onOutput } = {}) {
+    this._batchCancelled = false;
+    this.log('模擬模式', `開始執行模擬之全機最佳化 (cmd package compile -m ${mode} -f -a)...`);
+    const steps = [
+      `[cmd package compile -m ${mode} -f -a]: 正在對系統與使用者所有套件進行原生批次編譯...`,
+      `Compiling: com.google.android.chrome [status=${mode}]`,
+      `Compiling: jp.naver.line.android [status=${mode}]`,
+      `Compiling: com.android.chrome.beta [status=${mode}]`,
+      `Compiling: com.google.android.youtube [status=${mode}]`,
+      `Compiling: com.spotify.music [status=${mode}]`,
+      `Compiling: com.google.android.calendar [status=${mode}]`,
+      `Compiling: com.google.android.gm [status=${mode}]`,
+      `Compilation finished for all packages. dexopt completed successfully.`,
+    ];
+    for (const step of steps) {
+      if (this._batchCancelled) {
+        onOutput?.('\n⚠️ 模擬全機批次編譯已由使用者中斷。\n', true);
+        return { stdout: 'Cancelled', stderr: '', exitCode: 130 };
+      }
+      await new Promise((r) => setTimeout(r, 350));
+      this.log('全機 AOT', step);
+      onOutput?.(step + '\n', false);
+    }
+    return { stdout: 'Success\n', stderr: '', exitCode: 0 };
   }
 
   async _getDemoApps({ onProgress }) {
