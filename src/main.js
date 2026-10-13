@@ -90,6 +90,7 @@ const el = {
   forceStopModalTitle: document.getElementById('forceStopModalTitle'),
   forceStopTargetPkg: document.getElementById('forceStopTargetPkg'),
   forceStopModalDesc: document.getElementById('forceStopModalDesc'),
+  forceStopGoogleSearchLink: document.getElementById('forceStopGoogleSearchLink'),
   forceStopScopeContainer: document.getElementById('forceStopScopeContainer'),
   btnCancelForceStopModal: document.getElementById('btnCancelForceStopModal'),
   btnConfirmForceStopModal: document.getElementById('btnConfirmForceStopModal'),
@@ -746,9 +747,22 @@ function createAppCardHtml(app) {
             <h3 class="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words" title="${app.displayName}">
               ${app.displayName}
             </h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400 font-mono break-all mt-0.5" title="${app.packageName}">
-              ${app.packageName}
-            </p>
+            <div class="flex items-center gap-1.5 mt-0.5 min-w-0">
+              <p class="text-xs text-slate-500 dark:text-slate-400 font-mono break-all min-w-0" title="${app.packageName}">
+                ${app.packageName}
+              </p>
+              <a
+                href="https://www.google.com/search?q=${encodeURIComponent(app.packageName)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                onclick="event.stopPropagation()"
+                title="在 Google 搜尋此套件名稱 (${app.packageName})"
+                aria-label="在 Google 搜尋 ${app.packageName}"
+                class="btn-search-pkg shrink-0 inline-flex items-center justify-center p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-blue-500 dark:text-slate-400 dark:hover:text-blue-400 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                ${ICONS.google}
+              </a>
+            </div>
           </div>
         </div>
 
@@ -1228,9 +1242,21 @@ function openFastAotModal(initialMode) {
       .map(
         (app) => `
         <div class="flex items-center justify-between py-1 border-b border-slate-200/50 dark:border-slate-800/50 last:border-0">
-          <div class="min-w-0 pr-2">
+          <div class="min-w-0 pr-2 flex-1">
             <span class="font-medium text-slate-800 dark:text-slate-200 truncate block">${escapeHtml(app.displayName)}</span>
-            <span class="text-[10px] text-slate-500 font-mono truncate block">${escapeHtml(app.packageName)}</span>
+            <div class="flex items-center gap-1 min-w-0">
+              <span class="text-[10px] text-slate-500 font-mono truncate block min-w-0">${escapeHtml(app.packageName)}</span>
+              <a
+                href="https://www.google.com/search?q=${encodeURIComponent(app.packageName)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="hover:text-blue-500 transition-colors shrink-0"
+                title="在 Google 搜尋此套件名稱 (${escapeHtml(app.packageName)})"
+                aria-label="在 Google 搜尋 ${escapeHtml(app.packageName)}"
+              >
+                ${ICONS.google}
+              </a>
+            </div>
           </div>
           <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono shrink-0">verify</span>
         </div>
@@ -1389,9 +1415,21 @@ function showFastAotResultModal({ total, success, failed, duration, results, was
       .map(
         (r) => `
         <div class="flex items-center justify-between p-2 rounded-lg ${r.success ? 'bg-emerald-500/5' : 'bg-rose-500/5'} border border-slate-200/40 dark:border-slate-800/40">
-          <div class="min-w-0 pr-2">
+          <div class="min-w-0 pr-2 flex-1">
             <span class="font-medium text-slate-800 dark:text-slate-200 truncate block">${escapeHtml(r.displayName)}</span>
-            <span class="text-[10px] text-slate-400 font-mono truncate block">${escapeHtml(r.packageName)}</span>
+            <div class="flex items-center gap-1 min-w-0">
+              <span class="text-[10px] text-slate-400 font-mono truncate block min-w-0">${escapeHtml(r.packageName)}</span>
+              <a
+                href="https://www.google.com/search?q=${encodeURIComponent(r.packageName)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="hover:text-blue-500 transition-colors shrink-0"
+                title="在 Google 搜尋此套件名稱 (${escapeHtml(r.packageName)})"
+                aria-label="在 Google 搜尋 ${escapeHtml(r.packageName)}"
+              >
+                ${ICONS.google}
+              </a>
+            </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono">${r.oldStatus}</span>
@@ -1611,6 +1649,12 @@ function openSingleForceStopModal(packageName, displayName) {
   if (el.forceStopTargetPkg) {
     el.forceStopTargetPkg.textContent = packageName;
   }
+  if (el.forceStopGoogleSearchLink) {
+    el.forceStopGoogleSearchLink.href = `https://www.google.com/search?q=${encodeURIComponent(packageName)}`;
+    el.forceStopGoogleSearchLink.title = `在 Google 搜尋此套件名稱 (${packageName})`;
+    el.forceStopGoogleSearchLink.setAttribute('aria-label', `在 Google 搜尋 ${packageName}`);
+    el.forceStopGoogleSearchLink.classList.remove('hidden');
+  }
   if (el.forceStopModalDesc) {
     el.forceStopModalDesc.innerHTML = `
       強制停止將透過 <code class="px-1 py-0.5 bg-rose-200/50 dark:bg-rose-900/50 rounded font-mono text-[11px]">am force-stop ${packageName}</code> 立即終止該應用的所有進行中處理程序與背景服務，未儲存的內容可能遺失。下次開啟時，系統將重新載入最新編譯的 AOT 最佳化機器碼。
@@ -1634,6 +1678,7 @@ function openBatchForceStopModal() {
   if (el.forceStopTargetPkg) {
     el.forceStopTargetPkg.textContent = '執行指令: am force-stop <package>';
   }
+  el.forceStopGoogleSearchLink?.classList.add('hidden');
   if (el.forceStopModalDesc) {
     el.forceStopModalDesc.innerHTML = `
       批次強制停止將依所選範圍，逐一終止應用程式的所有背景進程與快取服務。這能確保剛編譯完畢的 AOT 最佳化機器碼在下次啟動時被立即重新載入。
@@ -1645,6 +1690,7 @@ function openBatchForceStopModal() {
 
 function closeForceStopModal() {
   el.forceStopConfirmModal?.classList.add('hidden');
+  el.forceStopGoogleSearchLink?.classList.add('hidden');
   state.pendingForceStop = null;
 }
 
@@ -1827,7 +1873,19 @@ function updateQueueUi(items = queueManager.items) {
               <td class="py-2.5 px-3 whitespace-nowrap">${statusBadge}</td>
               <td class="py-2.5 px-3 min-w-0">
                 <div class="font-medium text-slate-900 dark:text-slate-100 truncate">${escapeHtml(item.displayName)}</div>
-                <div class="text-[10px] text-slate-400 font-mono truncate">${escapeHtml(item.packageName)}</div>
+                <div class="text-[10px] text-slate-400 font-mono truncate flex items-center gap-1">
+                  <span class="truncate min-w-0">${escapeHtml(item.packageName)}</span>
+                  <a
+                    href="https://www.google.com/search?q=${encodeURIComponent(item.packageName)}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="hover:text-blue-500 transition-colors shrink-0"
+                    title="在 Google 搜尋此套件名稱 (${escapeHtml(item.packageName)})"
+                    aria-label="在 Google 搜尋 ${escapeHtml(item.packageName)}"
+                  >
+                    ${ICONS.google}
+                  </a>
+                </div>
               </td>
               <td class="py-2.5 px-3 whitespace-nowrap">
                 <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 font-mono text-slate-700 dark:text-slate-300">${item.mode}</span>
