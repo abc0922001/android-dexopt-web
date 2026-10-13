@@ -102,3 +102,33 @@ export function getAppIcon(pkg) {
       </svg>
     </div>`;
 }
+
+/**
+ * Escape HTML special characters for safe inclusion in attributes and innerHTML
+ * @param {string} str
+ * @returns {string}
+ */
+export function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Creates an accessible Google Search link button for an Android package name
+ * @param {string} packageName
+ * @param {string} [extraClasses]
+ * @returns {string} HTML string
+ */
+export function createGoogleSearchLink(packageName, extraClasses = '') {
+  if (!packageName) return '';
+  const safePkg = escapeHtml(packageName);
+  const url = `https://www.google.com/search?q=${encodeURIComponent(packageName)}`;
+  const extra = extraClasses ? ` ${extraClasses}` : '';
+  return `<a href="${url}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="在 Google 搜尋此套件名稱 (${safePkg})" aria-label="在 Google 搜尋 ${safePkg}" class="btn-search-pkg shrink-0 inline-flex items-center justify-center p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-blue-500 dark:text-slate-400 dark:hover:text-blue-400 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400${extra}">${ICONS.google}</a>`;
+}
+

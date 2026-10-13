@@ -129,6 +129,9 @@ test('formatDisplayName produces readable names', () => {
   assert.equal(formatDisplayName('com.android.chrome'), 'Google Chrome');
   assert.equal(formatDisplayName('jp.naver.line.android'), 'LINE');
   assert.equal(formatDisplayName('com.foo.bar_baz'), 'Bar Baz');
+  // Issue #8 example: com.gpconsumermobile.plus -> 環保集點 (GreenPoint)
+  assert.equal(formatDisplayName('com.gpconsumermobile.plus'), '環保集點 (GreenPoint)');
+  assert.equal(formatDisplayName('com.GpConsumerMobile.Plus'), '環保集點 (GreenPoint)');
 });
 
 test('parseDumpsysPackageStream handles pure dumpsys package dexopt output', () => {

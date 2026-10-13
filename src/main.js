@@ -1,5 +1,5 @@
 import { AdbController } from './adb-controller.js';
-import { getAppIcon, ICONS } from './icons.js';
+import { getAppIcon, ICONS, createGoogleSearchLink, escapeHtml } from './icons.js';
 import { sortApps } from './parser.js';
 import { AotQueueManager } from './queue-manager.js';
 import { APP_VERSION, getFormattedVersion } from './version.js';
@@ -602,6 +602,8 @@ function renderAppGrids() {
  */
 function createAppCardHtml(app) {
   const isAotSupported = !app.isCannotAot;
+  const safeDisplayName = escapeHtml(app.displayName || app.packageName);
+  const safePackageName = escapeHtml(app.packageName);
 
   // High-contrast status badge styling compliant with WCAG AA (>= 4.5:1)
   let statusBadgeClass = 'border-slate-400 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
@@ -744,24 +746,14 @@ function createAppCardHtml(app) {
             ${getAppIcon(app.packageName)}
           </div>
           <div class="min-w-0 flex-1">
-            <h3 class="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words" title="${app.displayName}">
-              ${app.displayName}
+            <h3 class="font-bold text-sm text-slate-900 dark:text-white leading-snug break-words" title="${safeDisplayName}">
+              ${safeDisplayName}
             </h3>
             <div class="flex items-center gap-1.5 mt-0.5 min-w-0">
-              <p class="text-xs text-slate-500 dark:text-slate-400 font-mono break-all min-w-0" title="${app.packageName}">
-                ${app.packageName}
+              <p class="text-xs text-slate-500 dark:text-slate-400 font-mono break-all min-w-0" title="${safePackageName}">
+                ${safePackageName}
               </p>
-              <a
-                href="https://www.google.com/search?q=${encodeURIComponent(app.packageName)}"
-                target="_blank"
-                rel="noopener noreferrer"
-                onclick="event.stopPropagation()"
-                title="在 Google 搜尋此套件名稱 (${app.packageName})"
-                aria-label="在 Google 搜尋 ${app.packageName}"
-                class="btn-search-pkg shrink-0 inline-flex items-center justify-center p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-blue-500 dark:text-slate-400 dark:hover:text-blue-400 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400"
-              >
-                ${ICONS.google}
-              </a>
+              ${createGoogleSearchLink(app.packageName)}
             </div>
           </div>
         </div>
@@ -1184,16 +1176,6 @@ function handleCancelBatch() {
   }
 }
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 /* ---------------- Fast AOT Mode (Issue #3) ---------------- */
 
 function getVerifyApps() {
@@ -1246,16 +1228,7 @@ function openFastAotModal(initialMode) {
             <span class="font-medium text-slate-800 dark:text-slate-200 truncate block">${escapeHtml(app.displayName)}</span>
             <div class="flex items-center gap-1 min-w-0">
               <span class="text-[10px] text-slate-500 font-mono truncate block min-w-0">${escapeHtml(app.packageName)}</span>
-              <a
-                href="https://www.google.com/search?q=${encodeURIComponent(app.packageName)}"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="hover:text-blue-500 transition-colors shrink-0"
-                title="在 Google 搜尋此套件名稱 (${escapeHtml(app.packageName)})"
-                aria-label="在 Google 搜尋 ${escapeHtml(app.packageName)}"
-              >
-                ${ICONS.google}
-              </a>
+              ${createGoogleSearchLink(app.packageName)}
             </div>
           </div>
           <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono shrink-0">verify</span>
@@ -1419,16 +1392,7 @@ function showFastAotResultModal({ total, success, failed, duration, results, was
             <span class="font-medium text-slate-800 dark:text-slate-200 truncate block">${escapeHtml(r.displayName)}</span>
             <div class="flex items-center gap-1 min-w-0">
               <span class="text-[10px] text-slate-400 font-mono truncate block min-w-0">${escapeHtml(r.packageName)}</span>
-              <a
-                href="https://www.google.com/search?q=${encodeURIComponent(r.packageName)}"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="hover:text-blue-500 transition-colors shrink-0"
-                title="在 Google 搜尋此套件名稱 (${escapeHtml(r.packageName)})"
-                aria-label="在 Google 搜尋 ${escapeHtml(r.packageName)}"
-              >
-                ${ICONS.google}
-              </a>
+              ${createGoogleSearchLink(r.packageName)}
             </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -1650,10 +1614,14 @@ function openSingleForceStopModal(packageName, displayName) {
     el.forceStopTargetPkg.textContent = packageName;
   }
   if (el.forceStopGoogleSearchLink) {
-    el.forceStopGoogleSearchLink.href = `https://www.google.com/search?q=${encodeURIComponent(packageName)}`;
-    el.forceStopGoogleSearchLink.title = `在 Google 搜尋此套件名稱 (${packageName})`;
-    el.forceStopGoogleSearchLink.setAttribute('aria-label', `在 Google 搜尋 ${packageName}`);
-    el.forceStopGoogleSearchLink.classList.remove('hidden');
+    if (packageName) {
+      el.forceStopGoogleSearchLink.href = `https://www.google.com/search?q=${encodeURIComponent(packageName)}`;
+      el.forceStopGoogleSearchLink.title = `在 Google 搜尋此套件名稱 (${packageName})`;
+      el.forceStopGoogleSearchLink.setAttribute('aria-label', `在 Google 搜尋 ${packageName}`);
+      el.forceStopGoogleSearchLink.classList.remove('hidden');
+    } else {
+      el.forceStopGoogleSearchLink.classList.add('hidden');
+    }
   }
   if (el.forceStopModalDesc) {
     el.forceStopModalDesc.innerHTML = `
@@ -1875,16 +1843,7 @@ function updateQueueUi(items = queueManager.items) {
                 <div class="font-medium text-slate-900 dark:text-slate-100 truncate">${escapeHtml(item.displayName)}</div>
                 <div class="text-[10px] text-slate-400 font-mono truncate flex items-center gap-1">
                   <span class="truncate min-w-0">${escapeHtml(item.packageName)}</span>
-                  <a
-                    href="https://www.google.com/search?q=${encodeURIComponent(item.packageName)}"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="hover:text-blue-500 transition-colors shrink-0"
-                    title="在 Google 搜尋此套件名稱 (${escapeHtml(item.packageName)})"
-                    aria-label="在 Google 搜尋 ${escapeHtml(item.packageName)}"
-                  >
-                    ${ICONS.google}
-                  </a>
+                  ${createGoogleSearchLink(item.packageName)}
                 </div>
               </td>
               <td class="py-2.5 px-3 whitespace-nowrap">

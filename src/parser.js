@@ -500,10 +500,15 @@ export function formatDisplayName(pkg) {
     'com.android.systemui': 'System UI',
     'com.tencent.mm': 'WeChat',
     'com.facebook.orca': 'Messenger',
+    'com.gpconsumermobile.plus': '環保集點 (GreenPoint)',
   };
 
-  if (KNOWN_NAMES[pkg]) {
-    return KNOWN_NAMES[pkg];
+  if (!pkg) return '';
+  const lowerPkg = String(pkg).toLowerCase();
+  for (const [knownPkg, knownName] of Object.entries(KNOWN_NAMES)) {
+    if (knownPkg.toLowerCase() === lowerPkg) {
+      return knownName;
+    }
   }
 
   // Split by dot and take the last or second to last segment
