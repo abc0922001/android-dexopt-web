@@ -398,12 +398,14 @@ export class AdbController {
    * @param {object} options
    * @param {boolean} [options.skipQueryStatus=false] - When true, skips dumpsys package re-query (for batch processing)
    * @param {boolean} [options.force=true] - When true, adds -f flag to force compilation; when false, compiles without -f (fast mode)
+   * @param {boolean} [options.autoSecondaryDex=true] - When true, automatically compiles secondary DEX if optimizable items exist
+   * @param {object} [options.appInfo] - Optional app record containing secondaryDex information
    */
-  async compileApp(packageName, mode = 'speed', { onOutput, skipQueryStatus = false, force = true } = {}) {
+  async compileApp(packageName, mode = 'speed', { onOutput, skipQueryStatus = false, force = true, autoSecondaryDex = true, appInfo } = {}) {
     this.log('最佳化', `正在編譯 [${packageName}]，模式: ${mode}${force ? ' (強制 -f)' : ' (快速/無 -f)'}...`);
     
     if (this.isDemoMode) {
-      return this._mockCompileApp(packageName, mode, { onOutput, force });
+      return this._mockCompileApp(packageName, mode, { onOutput, force, autoSecondaryDex, appInfo });
     }
 
     // cmd package compile -m <mode> [-f] <package>
@@ -414,6 +416,19 @@ export class AdbController {
     compileCmd.push(packageName);
 
     const compileRes = await this.exec(compileCmd, { onOutput });
+
+    // Issue #9 Problem 2: Auto-compile optimizable secondary DEX
+    if (autoSecondaryDex && (appInfo?.hasOptimizableSecondaryDex || appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
+      this.log('最佳化', `正在最佳化 [${packageName}] 之次要 DEX (--secondary-dex)...`);
+      const secCmd = ['cmd', 'package', 'compile', '-m', mode];
+      if (force) secCmd.push('-f');
+      secCmd.push('--secondary-dex', packageName);
+      try {
+        await this.exec(secCmd, { onOutput });
+      } catch (secErr) {
+        this.log('警告', `[${packageName}] --secondary-dex 編譯略過或受限: ${secErr.message}`);
+      }
+    }
 
     if (skipQueryStatus) {
       this.log('完成', `[${packageName}] 編譯指令已送出 (批次模式略過單一 dumpsys 查詢)`);
@@ -742,14 +757,30 @@ export class AdbController {
     }
   }
 
-  async _mockCompileApp(packageName, mode, { onOutput, force = true } = {}) {
+  async _mockCompileApp(packageName, mode, { onOutput, force = true, autoSecondaryDex = true, appInfo } = {}) {
     await new Promise((r) => setTimeout(r, 600));
-    const output = `Compiling ${packageName} with mode=${mode}${force ? ' -f' : ''} ...\nSuccess\n`;
+    let output = `Compiling ${packageName} with mode=${mode}${force ? ' -f' : ''} ...\nSuccess\n`;
+    if (autoSecondaryDex && (appInfo?.hasOptimizableSecondaryDex || appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
+      output += `Compiling secondary dex for ${packageName} with mode=${mode}${force ? ' -f' : ''} --secondary-dex ...\nSuccess\n`;
+    }
     onOutput?.(output, false);
     return {
       status: mode,
       reason: 'cmdline',
       hasCode: true,
+      splits: appInfo?.splits || [],
+      secondaryDex: (appInfo?.secondaryDex || []).map((s) => ({
+        ...s,
+        status: s.isUnsupportedContext || s.isRemoved ? s.status : mode,
+        isOptimizable: false,
+      })),
+      hasSecondaryDex: appInfo?.hasSecondaryDex || false,
+      hasOptimizableSecondaryDex: false,
+      secondaryDexSummary: appInfo?.secondaryDexSummary ? {
+        ...appInfo.secondaryDexSummary,
+        optimizableCount: 0,
+        compiledCount: appInfo.secondaryDexSummary.total - appInfo.secondaryDexSummary.restrictedCount,
+      } : null,
     };
   }
 
@@ -785,7 +816,7 @@ export class AdbController {
     onProgress?.({ phase: 2, message: '正在整理分類...' });
     await new Promise((r) => setTimeout(r, 200));
 
-    // High quality demo data faithfully reflecting the screenshots (Dark.jfif and Light.jfif)
+    // High quality demo data faithfully reflecting the screenshots and Issue #9 scenarios
     const frequentlyUsed = [
       {
         packageName: 'com.google.android.chrome',
@@ -801,6 +832,9 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '2h 45m',
+        splits: [],
+        secondaryDex: [],
+        hasSecondaryDex: false,
       },
       {
         packageName: 'jp.naver.line.android',
@@ -816,6 +850,33 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '1h 30m',
+        splits: [],
+        secondaryDex: [
+          {
+            path: '/data/user/0/jp.naver.line.android/app_pccache/5/pcam.jar',
+            status: 'verify',
+            reason: 'vdex',
+            isUnsupportedContext: true,
+            isRemoved: false,
+            isOptimizable: false,
+          },
+          {
+            path: '/data/user/0/jp.naver.line.android/app_pccache/5/pcam2.jar',
+            status: 'verify',
+            reason: 'vdex',
+            isUnsupportedContext: true,
+            isRemoved: false,
+            isOptimizable: false,
+          },
+        ],
+        hasSecondaryDex: true,
+        hasOptimizableSecondaryDex: false,
+        secondaryDexSummary: {
+          total: 2,
+          optimizableCount: 0,
+          restrictedCount: 2,
+          compiledCount: 0,
+        },
       },
       {
         packageName: 'com.android.chrome.beta',
@@ -831,6 +892,9 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '54m',
+        splits: [],
+        secondaryDex: [],
+        hasSecondaryDex: false,
       },
       {
         packageName: 'com.google.android.youtube',
@@ -846,6 +910,16 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '48m',
+        splits: [
+          {
+            name: 'split_config.arm64_v8a.apk',
+            path: '/data/app/com.google.android.youtube/split_config.arm64_v8a.apk',
+            status: 'speed-profile',
+            reason: 'bg-dexopt',
+          },
+        ],
+        secondaryDex: [],
+        hasSecondaryDex: false,
       },
       {
         packageName: 'com.spotify.music',

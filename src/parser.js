@@ -97,19 +97,75 @@ export function formatUsageDuration(ms) {
 }
 
 /**
+ * Check if a package is a known resource overlay, config, cutout, navbar, or shim package without DEX code
+ * @param {string} pkg
+ * @returns {boolean}
+ */
+export function isNoCodeOrOverlayPackage(pkg) {
+  if (!pkg || typeof pkg !== 'string') return false;
+  const lower = pkg.toLowerCase();
+  return (
+    lower.endsWith('.overlay') ||
+    lower.includes('.overlay.') ||
+    lower.endsWith('gxoverlay') ||
+    lower.includes('.auto_generated_rro_') ||
+    lower.includes('.auto_generated_characteristics_rro') ||
+    lower.endsWith('.config') ||
+    lower.includes('.config.') ||
+    lower.endsWith('.ctsshim') ||
+    lower.includes('.ctsshim.') ||
+    lower.startsWith('com.android.internal.display.cutout.emulation.') ||
+    lower.startsWith('com.android.internal.systemui.navbar.')
+  );
+}
+
+/**
  * Parse output of `dumpsys usagestats`
- * Extracts packages that have recorded foreground time and their duration in ms
+ * Extracts packages that have recorded foreground time across multiple intervals:
+ * daily, weekly, monthly, and yearly stats.
+ * Computes a weighted recent activity score and prioritizes weekly stats for card display.
  * 
  * @param {string} text
- * @returns {Map<string, { foregroundMs: number }>}
+ * @returns {Map<string, { foregroundMs: number, weeklyMs: number, monthlyMs: number, dailyMs: number, yearlyMs: number, weightedScore: number }>}
  */
 export function parseUsageStats(text) {
   const usageMap = new Map();
   if (!text) return usageMap;
 
   const lines = text.split(/\r?\n/);
+  let currentSection = 'unknown'; // 'daily' | 'weekly' | 'monthly' | 'yearly' | 'unknown'
+
+  const getOrCreate = (pkg) => {
+    if (!usageMap.has(pkg)) {
+      usageMap.set(pkg, {
+        packageName: pkg,
+        foregroundMs: 0,
+        weeklyMs: 0,
+        monthlyMs: 0,
+        dailyMs: 0,
+        yearlyMs: 0,
+        weightedScore: 0,
+      });
+    }
+    return usageMap.get(pkg);
+  };
 
   for (const line of lines) {
+    // Detect interval headers in dumpsys usagestats
+    if (/In-memory\s+daily\s+stats/i.test(line) || /Daily\s+stats/i.test(line)) {
+      currentSection = 'daily';
+      continue;
+    } else if (/In-memory\s+weekly\s+stats/i.test(line) || /Weekly\s+stats/i.test(line)) {
+      currentSection = 'weekly';
+      continue;
+    } else if (/In-memory\s+monthly\s+stats/i.test(line) || /Monthly\s+stats/i.test(line)) {
+      currentSection = 'monthly';
+      continue;
+    } else if (/In-memory\s+yearly\s+stats/i.test(line) || /Yearly\s+stats/i.test(line)) {
+      currentSection = 'yearly';
+      continue;
+    }
+
     if (!line.includes('totalTime') && !line.includes('TOTAL_TIME') && !line.includes('timeActive')) {
       continue;
     }
@@ -129,11 +185,46 @@ export function parseUsageStats(text) {
       }
 
       if (ms > 0) {
-        const prev = usageMap.get(pkg)?.foregroundMs || 0;
-        if (ms > prev) {
-          usageMap.set(pkg, { foregroundMs: ms });
+        const record = getOrCreate(pkg);
+        if (currentSection === 'daily') {
+          record.dailyMs = Math.max(record.dailyMs, ms);
+        } else if (currentSection === 'weekly') {
+          record.weeklyMs = Math.max(record.weeklyMs, ms);
+        } else if (currentSection === 'monthly') {
+          record.monthlyMs = Math.max(record.monthlyMs, ms);
+        } else if (currentSection === 'yearly') {
+          record.yearlyMs = Math.max(record.yearlyMs, ms);
+        } else {
+          // If no section headers were found (e.g. mock test), populate weeklyMs
+          record.weeklyMs = Math.max(record.weeklyMs, ms);
         }
       }
+    }
+  }
+
+  // Calculate final foregroundMs and weighted activity score
+  for (const [pkg, record] of usageMap.entries()) {
+    // Card display prioritizes weekly; fallbacks to monthly -> daily -> yearly
+    if (record.weeklyMs > 0) {
+      record.foregroundMs = record.weeklyMs;
+    } else if (record.monthlyMs > 0) {
+      record.foregroundMs = record.monthlyMs;
+    } else if (record.dailyMs > 0) {
+      record.foregroundMs = record.dailyMs;
+    } else if (record.yearlyMs > 0) {
+      record.foregroundMs = record.yearlyMs;
+    } else {
+      record.foregroundMs = 0;
+    }
+
+    // Weighted activity score: Weekly * 3 + Monthly * 1 + Daily * 2 + capped Yearly bonus
+    record.weightedScore = (record.weeklyMs * 3) +
+                           (record.monthlyMs * 1) +
+                           (record.dailyMs * 2) +
+                           Math.min(record.yearlyMs, 3600000 * 5) * 0.05;
+
+    if (record.foregroundMs === 0 && record.weightedScore === 0) {
+      usageMap.delete(pkg);
     }
   }
 
@@ -174,10 +265,10 @@ export function parseLauncherActivities(text) {
 
 /**
  * Parse `dumpsys package` (single stream parsing for all packages)
- * Extracts per-package Dexopt status, reason, and hasCode flag.
+ * Extracts per-package Dexopt status, reason, hasCode flag, splits, and secondary DEX files.
  * 
  * @param {string} text
- * @returns {Map<string, { status: string, reason: string, hasCode: boolean, isOverlay: boolean }>}
+ * @returns {Map<string, { status: string, reason: string, hasCode: boolean, isOverlay: boolean, splits: Array<object>, secondaryDex: Array<object>, hasSecondaryDex: boolean, hasOptimizableSecondaryDex: boolean, secondaryDexSummary: object|null }>}
  */
 export function parseDumpsysPackageStream(text) {
   const dexoptMap = new Map();
@@ -185,19 +276,46 @@ export function parseDumpsysPackageStream(text) {
 
   const lines = text.split(/\r?\n/);
   let currentInfo = null;
+  let inSecondaryDexSection = false;
+  let currentSubItem = null; // { type: 'primary' | 'split' | 'secondary', path: string, ... }
+  let inDexoptSection = false;
 
-  // Matches either:
-  // "Package [com.foo] (...)" (from Package Details in dumpsys package)
-  // "  [com.foo]" (from dumpsys package dexopt or Dexopt state: section)
-  // "Package: com.foo"
   const pkgStartRegex = /^(?:\s*Package\s*\[|\s*\[|\s*Package:\s*)(?<pkg>[a-zA-Z0-9_\.]+)[\]\:]/i;
-
-  // Pattern 1: [status=speed-profile] [reason=bg-dexopt] or [status=speed]
   const patternBrackets = /\[status=(?<status>[a-zA-Z0-9_-]+)\](?:\s+\[reason=(?<reason>[a-zA-Z0-9_-]+)\])?/i;
-  // Pattern 2: compilation filter: speed-profile or compilation_filter=speed-profile
   const patternFilter = /(?:compilation[-_\s]*filter|status)[=:\s]+(?<status>[a-zA-Z0-9_-]+)/i;
-  // Pattern 3: compilation reason: bg-dexopt or reason=bg-dexopt
   const patternReason = /(?:compilation[-_\s]*reason|reason)[=:\s]+(?<reason>[a-zA-Z0-9_-]+)/i;
+
+  const finalizePreviousInfo = () => {
+    if (!currentInfo) return;
+
+    // Detect empty package block in Dexopt state: (Issue #9 Problem 3)
+    // If package appeared in Dexopt state and has 0 paths and 0 status/filter lines,
+    // or matches known RRO/Overlay/Config/Shim naming pattern, mark as cannotAot
+    if (isNoCodeOrOverlayPackage(currentInfo.packageName)) {
+      currentInfo.hasCode = false;
+      currentInfo.isOverlay = true;
+      if (currentInfo.status === 'unknown') currentInfo.status = 'N/A';
+      if (currentInfo.reason === 'unknown') currentInfo.reason = 'no-code';
+    } else if (currentInfo.inDexoptSection && currentInfo.pathCount === 0 && !currentInfo.hasPrimaryStatus) {
+      currentInfo.hasCode = false;
+      currentInfo.isOverlay = true;
+      currentInfo.status = 'N/A';
+      currentInfo.reason = 'no-code';
+    }
+
+    // Summarize secondary DEX items if present
+    if (currentInfo.secondaryDex && currentInfo.secondaryDex.length > 0) {
+      currentInfo.hasSecondaryDex = true;
+      const optimizable = currentInfo.secondaryDex.filter((s) => s.isOptimizable);
+      currentInfo.hasOptimizableSecondaryDex = optimizable.length > 0;
+      currentInfo.secondaryDexSummary = {
+        total: currentInfo.secondaryDex.length,
+        optimizableCount: optimizable.length,
+        restrictedCount: currentInfo.secondaryDex.filter((s) => s.isUnsupportedContext || s.isRemoved).length,
+        compiledCount: currentInfo.secondaryDex.filter((s) => s.status === 'speed' || s.status === 'speed-profile').length,
+      };
+    }
+  };
 
   const getOrCreateInfo = (pkg) => {
     if (!dexoptMap.has(pkg)) {
@@ -207,6 +325,14 @@ export function parseDumpsysPackageStream(text) {
         reason: 'unknown',
         hasCode: true,
         isOverlay: false,
+        hasPrimaryStatus: false,
+        pathCount: 0,
+        inDexoptSection: false,
+        splits: [],
+        secondaryDex: [],
+        hasSecondaryDex: false,
+        hasOptimizableSecondaryDex: false,
+        secondaryDexSummary: null,
       });
     }
     return dexoptMap.get(pkg);
@@ -215,12 +341,22 @@ export function parseDumpsysPackageStream(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
+    if (/^Dexopt state:/i.test(line.trim())) {
+      inDexoptSection = true;
+    }
+
     const pkgMatch = line.match(pkgStartRegex);
     if (pkgMatch && pkgMatch.groups && pkgMatch.groups.pkg) {
       const candidatePkg = pkgMatch.groups.pkg;
       // Filter out non-package identifiers (e.g. instruction sets or paths)
       if (candidatePkg.includes('.') && !candidatePkg.startsWith('http')) {
+        finalizePreviousInfo();
         currentInfo = getOrCreateInfo(candidatePkg);
+        if (inDexoptSection || /^\s*\[[a-zA-Z0-9_\.]+\]/i.test(line)) {
+          currentInfo.inDexoptSection = true;
+        }
+        inSecondaryDexSection = false;
+        currentSubItem = null;
         continue;
       }
     }
@@ -235,49 +371,155 @@ export function parseDumpsysPackageStream(text) {
       currentInfo.isOverlay = true;
     }
 
-    // Try brackets first: [status=speed-profile] [reason=bg-dexopt]
-    const bracketMatch = line.match(patternBrackets);
-    if (bracketMatch && bracketMatch.groups) {
-      if (bracketMatch.groups.status) currentInfo.status = bracketMatch.groups.status;
-      if (bracketMatch.groups.reason) currentInfo.reason = bracketMatch.groups.reason;
+    // Detect known secondary dex files: section
+    if (/known secondary dex files:/i.test(line)) {
+      inSecondaryDexSection = true;
+      currentSubItem = null;
       continue;
     }
 
-    // Try filter/status
-    const filterMatch = line.match(patternFilter);
-    if (filterMatch && filterMatch.groups && filterMatch.groups.status) {
-      const s = filterMatch.groups.status;
-      if (s !== 'kOatUpToDate') {
-        currentInfo.status = s;
+    // Detect primary or split APK path line
+    const pathMatch = line.match(/^\s*path:\s*(.+)$/i);
+    if (pathMatch) {
+      const p = pathMatch[1].trim();
+      currentInfo.pathCount++;
+      const isSplit = p.includes('/split_') || p.includes('.split_');
+      currentSubItem = {
+        type: isSplit ? 'split' : 'primary',
+        path: p,
+        name: isSplit ? (p.split('/').pop() || p) : 'base.apk',
+        status: 'unknown',
+        reason: 'unknown',
+      };
+      if (isSplit) {
+        currentInfo.splits.push(currentSubItem);
+      }
+      continue;
+    }
+
+    // Detect secondary dex file path inside known secondary dex files:
+    if (inSecondaryDexSection) {
+      const secPathMatch = line.match(/^\s*(\/[a-zA-Z0-9_\-\.\/]+(?:\.jar|\.dex|\.apk))(?:\s*\(removed\))?/i);
+      if (secPathMatch) {
+        const secPath = secPathMatch[1].trim();
+        const isRemoved = line.includes('(removed)');
+        currentSubItem = {
+          type: 'secondary',
+          path: secPath,
+          status: 'unknown',
+          reason: 'unknown',
+          isRemoved,
+          isUnsupportedContext: false,
+          isOptimizable: false,
+        };
+        currentInfo.secondaryDex.push(currentSubItem);
+        currentInfo.pathCount++;
+        continue;
+      }
+
+      // Check class loader context & removed/error location
+      if (/class loader context:/i.test(line)) {
+        if (/UnsupportedClassLoaderContext/i.test(line) && currentSubItem && currentSubItem.type === 'secondary') {
+          currentSubItem.isUnsupportedContext = true;
+          currentSubItem.isOptimizable = false;
+        }
+      }
+      if (/location is error/i.test(line) && currentSubItem && currentSubItem.type === 'secondary') {
+        currentSubItem.isRemoved = true;
+        currentSubItem.isOptimizable = false;
       }
     }
 
-    // Try reason
-    const reasonMatch = line.match(patternReason);
-    if (reasonMatch && reasonMatch.groups && reasonMatch.groups.reason) {
-      currentInfo.reason = reasonMatch.groups.reason;
+    // Extract status and reason from line
+    let lineStatus = null;
+    let lineReason = null;
+
+    const bracketMatch = line.match(patternBrackets);
+    if (bracketMatch && bracketMatch.groups) {
+      lineStatus = bracketMatch.groups.status;
+      lineReason = bracketMatch.groups.reason;
+    } else {
+      const filterMatch = line.match(patternFilter);
+      if (filterMatch && filterMatch.groups && filterMatch.groups.status) {
+        const s = filterMatch.groups.status;
+        if (s !== 'kOatUpToDate') lineStatus = s;
+      }
+      const reasonMatch = line.match(patternReason);
+      if (reasonMatch && reasonMatch.groups && reasonMatch.groups.reason) {
+        lineReason = reasonMatch.groups.reason;
+      }
+    }
+
+    if (lineStatus || lineReason) {
+      if (inSecondaryDexSection) {
+        if (currentSubItem && currentSubItem.type === 'secondary') {
+          if (lineStatus) currentSubItem.status = lineStatus;
+          if (lineReason) currentSubItem.reason = lineReason;
+          currentSubItem.isOptimizable = !currentSubItem.isUnsupportedContext &&
+                                         !currentSubItem.isRemoved &&
+                                         currentSubItem.status !== 'speed' &&
+                                         currentSubItem.status !== 'speed-profile';
+        }
+      } else if (currentSubItem && currentSubItem.type === 'split') {
+        if (lineStatus) currentSubItem.status = lineStatus;
+        if (lineReason) currentSubItem.reason = lineReason;
+      } else {
+        // Primary APK (base.apk)
+        // First-Match for primary base.apk locks the main status & reason! (Issue #9 Problem 1)
+        if (lineStatus && (!currentInfo.hasPrimaryStatus || currentInfo.status === 'unknown')) {
+          currentInfo.status = lineStatus;
+          currentInfo.hasPrimaryStatus = true;
+        }
+        if (lineReason && (!currentInfo.hasPrimaryReason || currentInfo.reason === 'unknown')) {
+          currentInfo.reason = lineReason;
+          currentInfo.hasPrimaryReason = true;
+        }
+      }
     }
   }
 
+  finalizePreviousInfo();
   return dexoptMap;
 }
 
 /**
  * Parse a single package's dumpsys output (for partial re-query after compile)
  * @param {string} text
- * @returns {{ status: string, reason: string, hasCode: boolean }}
+ * @returns {{ status: string, reason: string, hasCode: boolean, splits: Array<object>, secondaryDex: Array<object>, hasSecondaryDex: boolean, hasOptimizableSecondaryDex: boolean, secondaryDexSummary: object|null }}
  */
 export function parseSinglePackageDexopt(text) {
   const result = {
     status: 'unknown',
     reason: 'unknown',
     hasCode: true,
+    splits: [],
+    secondaryDex: [],
+    hasSecondaryDex: false,
+    hasOptimizableSecondaryDex: false,
+    secondaryDexSummary: null,
   };
 
   if (!text) return result;
 
   if (text.includes('hasCode=false') || text.includes('apk does not have code') || text.includes('(none)')) {
     result.hasCode = false;
+  }
+
+  // Use parseDumpsysPackageStream to ensure 100% parsing parity with batch scanning
+  const streamMap = parseDumpsysPackageStream(text);
+  if (streamMap.size > 0) {
+    const firstInfo = streamMap.values().next().value;
+    if (firstInfo) {
+      result.status = firstInfo.status;
+      result.reason = firstInfo.reason;
+      result.hasCode = firstInfo.hasCode;
+      result.splits = firstInfo.splits;
+      result.secondaryDex = firstInfo.secondaryDex;
+      result.hasSecondaryDex = firstInfo.hasSecondaryDex;
+      result.hasOptimizableSecondaryDex = firstInfo.hasOptimizableSecondaryDex;
+      result.secondaryDexSummary = firstInfo.secondaryDexSummary;
+      return result;
+    }
   }
 
   const bracketMatch = text.match(/\[status=(?<status>[a-zA-Z0-9_-]+)\](?:\s+\[reason=(?<reason>[a-zA-Z0-9_-]+)\])?/i);
@@ -307,7 +549,7 @@ export function parseSinglePackageDexopt(text) {
  * - Cannot AOT (Bottom)
  * 
  * @param {Array<{ packageName: string, path: string, isSystem: boolean }>} packageList
- * @param {Set<string>} usageSet
+ * @param {Map<string, object>|Set<string>} usageData
  * @param {Set<string>} launcherSet
  * @param {Map<string, { status: string, reason: string, hasCode: boolean, isOverlay: boolean }>} dexoptMap
  * @returns {{ frequentlyUsed: Array<object>, general: Array<object>, cannotAot: Array<object> }}
@@ -327,6 +569,13 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     return 0;
   };
 
+  const getWeightedScore = (pkg) => {
+    if (usageData instanceof Map) {
+      return usageData.get(pkg)?.weightedScore || usageData.get(pkg)?.foregroundMs || 0;
+    }
+    return getUsageMs(pkg);
+  };
+
   for (const pkgItem of packageList) {
     const pkg = pkgItem.packageName;
     const dexopt = dexoptMap.get(pkg) || {
@@ -334,6 +583,11 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
       reason: 'unknown',
       hasCode: true,
       isOverlay: false,
+      splits: [],
+      secondaryDex: [],
+      hasSecondaryDex: false,
+      hasOptimizableSecondaryDex: false,
+      secondaryDexSummary: null,
     };
 
     const isCannotAot = (
@@ -342,7 +596,7 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
       dexopt.status === 'verify-none' ||
       dexopt.status === 'error' ||
       dexopt.reason === 'no-code' ||
-      pkg.endsWith('.overlay')
+      isNoCodeOrOverlayPackage(pkg)
     );
 
     const foregroundMs = getUsageMs(pkg);
@@ -369,6 +623,11 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
       foregroundMs,
       usageTimeFormatted: formatUsageDuration(foregroundMs),
       isLauncherApp,
+      splits: dexopt.splits || [],
+      secondaryDex: dexopt.secondaryDex || [],
+      hasSecondaryDex: dexopt.hasSecondaryDex || false,
+      hasOptimizableSecondaryDex: dexopt.hasOptimizableSecondaryDex || false,
+      secondaryDexSummary: dexopt.secondaryDexSummary || null,
     };
 
     if (isCannotAot) {
@@ -380,11 +639,11 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
   }
 
   // Calculate usage score to find truly frequently used apps:
-  // 1. Actual usage time is the primary factor.
+  // 1. Weighted recent activity score (Weekly*3 + Monthly*1 + Daily*2) is the primary factor.
   // 2. User launcher apps get priority over background services.
   // 3. User-installed apps get priority over system apps.
   const scored = candidates.map((app) => {
-    let score = app.foregroundMs || 0;
+    let score = getWeightedScore(app.packageName);
     if (app.isLauncherApp && !app.isSystem) {
       score += 180000; // 3 min boost for user launcher apps
     } else if (!app.isSystem) {
@@ -414,8 +673,16 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
 
   for (const item of scored) {
     const app = item.app;
-    // Qualify for Frequently Used if within top quota and meets minForegroundMs threshold
-    if (frequentlyUsed.length < maxFrequentlyUsed && item.score >= minForegroundMs && item.score > 0) {
+    // Issue #9 Problem 4: System apps without a launcher activity (e.g. systemui, hubui)
+    // are strictly excluded from Frequently Used!
+    const isSystemBackgroundService = app.isSystem && !app.isLauncherApp;
+
+    if (
+      !isSystemBackgroundService &&
+      frequentlyUsed.length < maxFrequentlyUsed &&
+      item.score >= minForegroundMs &&
+      item.score > 0
+    ) {
       app.tier = 'frequently_used';
       frequentlyUsed.push(app);
     } else {
@@ -437,7 +704,16 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
         i--;
       }
     }
-    // If still empty (all system apps), take top general apps
+    // If still empty (all system apps), take top general launcher apps (excluding pure background services)
+    for (let i = 0; i < general.length && frequentlyUsed.length < targetFallbackCount; i++) {
+      if (general[i].isLauncherApp) {
+        const promoted = general.splice(i, 1)[0];
+        promoted.tier = 'frequently_used';
+        frequentlyUsed.push(promoted);
+        i--;
+      }
+    }
+    // Final emergency fallback if no launcher apps at all
     while (frequentlyUsed.length < targetFallbackCount && general.length > 0) {
       const promoted = general.shift();
       promoted.tier = 'frequently_used';

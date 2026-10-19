@@ -411,5 +411,175 @@ test('sortApps correctly sorts apps by profile_none_first', () => {
   assert.strictEqual(sorted[3].displayName, 'App Ready');
 });
 
+test('parseDumpsysPackageStream keeps base.apk status when package contains secondary dex files (Issue #9 Problem 1)', () => {
+  const sample = `
+Dexopt state:
+  [jp.naver.line.android]
+    path: /data/app/~~lGjQskm1L50EgDBenZAvGQ==/jp.naver.line.android-bY0_iGU5cmE8XKQx0nFSPg==/base.apk
+      arm64: [status=speed] [reason=cmdline] [primary-abi]
+        [location is /data/app/base.odex]
+    known secondary dex files:
+      /data/user/0/jp.naver.line.android/app_pccache/5/7DFE2A173A05244DA1972708DDF9CEA0A1001D82/pcam.jar
+        arm64: [status=verify] [reason=vdex] [primary-abi]
+        class loader context: PCL[];PCL[/data/app/base.apk]
+      /data/user/0/jp.naver.line.android/app_pccache/5/914096012F5AC546A98FAB41613AF7AC504A530F/pcam.jar (removed)
+        arm64: [status=unknown] [reason=unknown] [primary-abi]
+        [location is error]
+        class loader context: =UnsupportedClassLoaderContext=
+      /data/user/0/jp.naver.line.android/app_pccache/5/BE9A61ABBF5A97C8328BE6223F3E2589CE74306D/pcam.jar
+        arm64: [status=verify] [reason=vdex] [primary-abi]
+  `;
+  const map = parseDumpsysPackageStream(sample);
+  const line = map.get('jp.naver.line.android');
+  assert.ok(line, 'Must parse jp.naver.line.android');
+  // Primary status must be speed (NOT overwritten by pcam.jar's verify)
+  assert.strictEqual(line.status, 'speed');
+  assert.strictEqual(line.reason, 'cmdline');
+  assert.strictEqual(line.hasSecondaryDex, true);
+  assert.strictEqual(line.secondaryDex.length, 3);
+  assert.strictEqual(line.secondaryDexSummary.total, 3);
+  assert.strictEqual(line.secondaryDexSummary.restrictedCount, 1);
+});
+
+test('parseDumpsysPackageStream keeps base.apk status when package contains split APKs (Issue #9 Problem 1)', () => {
+  const sample = `
+Dexopt state:
+  [com.shopback.app]
+    path: /data/app/~~lcj93QIYstboqQuvtmd-jg==/com.shopback.app-bLT6viwDh09bLIPPREk_ZA==/base.apk
+      arm64: [status=speed-profile] [reason=bg-dexopt] [primary-abi]
+    path: /data/app/~~lcj93QIYstboqQuvtmd-jg==/com.shopback.app-bLT6viwDh09bLIPPREk_ZA==/split_snapreceipt.apk
+      arm64: [status=verify] [reason=vdex-dm] [primary-abi]
+  `;
+  const map = parseDumpsysPackageStream(sample);
+  const sb = map.get('com.shopback.app');
+  assert.ok(sb, 'Must parse com.shopback.app');
+  assert.strictEqual(sb.status, 'speed-profile');
+  assert.strictEqual(sb.reason, 'bg-dexopt');
+  assert.strictEqual(sb.splits.length, 1);
+  assert.strictEqual(sb.splits[0].name, 'split_snapreceipt.apk');
+  assert.strictEqual(sb.splits[0].status, 'verify');
+});
+
+test('parseDumpsysPackageStream detects empty package blocks as cannotAot (Issue #9 Problem 3)', () => {
+  const sample = `
+Dexopt state:
+  [com.android.angle]
+    path: /product/priv-app/ANGLE/ANGLE.apk
+      arm64: [status=speed-profile] [reason=bg-dexopt] [primary-abi]
+  [com.android.appsearch.aiseal.config]
+  [com.android.backupconfirm]
+    path: /system/priv-app/BackupRestoreConfirmation/BackupRestoreConfirmation.apk
+      arm64: [status=speed] [reason=cmdline] [primary-abi]
+  [com.android.bips.auto_generated_rro_product__]
+  [com.android.internal.systemui.navbar.gestural]
+  `;
+  const map = parseDumpsysPackageStream(sample);
+
+  // Normal apps with paths
+  assert.strictEqual(map.get('com.android.angle').status, 'speed-profile');
+  assert.strictEqual(map.get('com.android.angle').hasCode, true);
+  assert.strictEqual(map.get('com.android.backupconfirm').status, 'speed');
+
+  // Empty blocks (RRO / Config / Navbar)
+  const config = map.get('com.android.appsearch.aiseal.config');
+  assert.ok(config);
+  assert.strictEqual(config.hasCode, false);
+  assert.strictEqual(config.status, 'N/A');
+  assert.strictEqual(config.reason, 'no-code');
+
+  const rro = map.get('com.android.bips.auto_generated_rro_product__');
+  assert.ok(rro);
+  assert.strictEqual(rro.hasCode, false);
+  assert.strictEqual(rro.status, 'N/A');
+
+  const navbar = map.get('com.android.internal.systemui.navbar.gestural');
+  assert.ok(navbar);
+  assert.strictEqual(navbar.hasCode, false);
+  assert.strictEqual(navbar.status, 'N/A');
+});
+
+test('parseUsageStats parses multi-interval stats prioritizing weekly (Issue #9 Problem 4)', () => {
+  const sample = `
+  In-memory daily stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="06:16" appLaunchCount=9
+      package=com.google.assistant.hubui totalTimeUsed="46:45" appLaunchCount=3
+      package=com.recent.app totalTimeUsed="15:00"
+  In-memory weekly stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="1:02:01" appLaunchCount=95
+      package=com.recent.app totalTimeUsed="30:00"
+  In-memory monthly stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="6:10:16" appLaunchCount=516
+      package=com.stale.app totalTimeUsed="10:00:00"
+  In-memory yearly stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="14:21:54" appLaunchCount=1371
+      package=com.google.assistant.hubui totalTimeUsed="36:57:33" appLaunchCount=160
+      package=com.stale.app totalTimeUsed="115:33:42" appLaunchCount=1044
+  `;
+  const usageMap = parseUsageStats(sample);
+
+  assert.ok(usageMap.has('jp.naver.line.android'));
+  const line = usageMap.get('jp.naver.line.android');
+  // foregroundMs must prioritize weekly (1h 2m 1s = 3721000ms), NOT yearly (14h)
+  assert.strictEqual(line.foregroundMs, (1 * 3600 + 2 * 60 + 1) * 1000);
+  assert.strictEqual(line.weeklyMs, (1 * 3600 + 2 * 60 + 1) * 1000);
+
+  // Recent app with weekly active time should have a solid weighted score
+  const recent = usageMap.get('com.recent.app');
+  assert.strictEqual(recent.weeklyMs, 30 * 60 * 1000);
+  assert.ok(recent.weightedScore > 0);
+
+  // Stale app with 0 daily/weekly but huge yearly
+  const stale = usageMap.get('com.stale.app');
+  assert.strictEqual(stale.weeklyMs, 0);
+  // Falls back to monthly
+  assert.strictEqual(stale.foregroundMs, 10 * 3600 * 1000);
+});
+
+test('classifyApps strictly excludes system background services without launcher activity from frequentlyUsed (Issue #9 Problem 4)', () => {
+  const pkgList = [
+    { packageName: 'jp.naver.line.android', path: '/data/app/line.apk', isSystem: false },
+    { packageName: 'com.google.android.youtube', path: '/data/app/yt.apk', isSystem: false },
+    { packageName: 'com.google.assistant.hubui', path: '/system/priv-app/HubUI.apk', isSystem: true },
+    { packageName: 'com.android.systemui', path: '/system/framework/SystemUI.apk', isSystem: true },
+    { packageName: 'com.android.chrome', path: '/system/app/Chrome.apk', isSystem: true }, // System app WITH launcher
+  ];
+
+  const usageMap = new Map([
+    // HubUI and SystemUI have enormous yearly foreground time
+    ['com.google.assistant.hubui', { foregroundMs: 36 * 3600 * 1000, weightedScore: 500000000 }],
+    ['com.android.systemui', { foregroundMs: 7 * 3600 * 1000, weightedScore: 300000000 }],
+    ['jp.naver.line.android', { foregroundMs: 3600000, weightedScore: 15000000 }],
+    ['com.google.android.youtube', { foregroundMs: 2500000, weightedScore: 10000000 }],
+    ['com.android.chrome', { foregroundMs: 1800000, weightedScore: 8000000 }],
+  ]);
+
+  // HubUI and SystemUI are NOT in launcherSet; Chrome and user apps ARE
+  const launcherSet = new Set(['jp.naver.line.android', 'com.google.android.youtube', 'com.android.chrome']);
+  const dexoptMap = new Map();
+
+  const { frequentlyUsed, general } = classifyApps(pkgList, usageMap, launcherSet, dexoptMap, {
+    maxFrequentlyUsed: 5,
+  });
+
+  const frequentPkgs = frequentlyUsed.map((a) => a.packageName);
+  const generalPkgs = general.map((a) => a.packageName);
+
+  // HubUI and SystemUI MUST NOT be in frequentlyUsed despite having massive usage time!
+  assert.strictEqual(frequentPkgs.includes('com.google.assistant.hubui'), false);
+  assert.strictEqual(frequentPkgs.includes('com.android.systemui'), false);
+  assert.ok(generalPkgs.includes('com.google.assistant.hubui'));
+  assert.ok(generalPkgs.includes('com.android.systemui'));
+
+  // User apps and Chrome (system app WITH launcher) ARE in frequentlyUsed
+  assert.ok(frequentPkgs.includes('jp.naver.line.android'));
+  assert.ok(frequentPkgs.includes('com.google.android.youtube'));
+  assert.ok(frequentPkgs.includes('com.android.chrome'));
+});
+
+
 
 

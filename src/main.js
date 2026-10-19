@@ -195,14 +195,21 @@ const queueManager = new AotQueueManager({
   onProcessItem: async (item) => {
     appendTerminalLog(`\n[AOT 佇列] 正在編譯 [${item.displayName}] (${item.packageName})，模式: ${item.mode}...\n`);
     try {
+      const app = findApp(item.packageName);
       const updated = await adbController.compileApp(item.packageName, item.mode, {
         onOutput: (chunk) => appendTerminalLog(chunk),
+        appInfo: app,
       });
 
-      const app = findApp(item.packageName);
       if (app) {
         app.status = updated.status;
         app.reason = updated.reason;
+        if (updated.splits) app.splits = updated.splits;
+        if (updated.secondaryDex) app.secondaryDex = updated.secondaryDex;
+        if (updated.hasSecondaryDex !== undefined) app.hasSecondaryDex = updated.hasSecondaryDex;
+        if (updated.hasOptimizableSecondaryDex !== undefined) app.hasOptimizableSecondaryDex = updated.hasOptimizableSecondaryDex;
+        if (updated.secondaryDexSummary !== undefined) app.secondaryDexSummary = updated.secondaryDexSummary;
+
         if (item.mode === 'speed-profile' && updated.status === 'verify') {
           app.overrideMode = 'speed';
           showToast(
@@ -635,6 +642,52 @@ function createAppCardHtml(app) {
     ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-300 dark:border-slate-700" title="系統內建應用程式">系統內建</span>`
     : `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border border-sky-200 dark:border-sky-800" title="用戶自己安裝的應用程式">用戶安裝</span>`;
 
+  // Split APK badge
+  let splitBadge = '';
+  if (app.splits && app.splits.length > 0) {
+    const uncompiledSplits = app.splits.filter((s) => s.status && s.status !== 'speed' && s.status !== 'speed-profile');
+    const splitColor = uncompiledSplits.length > 0
+      ? 'border-amber-500/40 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300'
+      : 'border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400';
+    const splitTooltip = `包含 ${app.splits.length} 個 Split APK 模組${uncompiledSplits.length > 0 ? ` (${uncompiledSplits.length} 個狀態為 ${uncompiledSplits[0].status})` : ' (已最佳化)'}`;
+    splitBadge = `
+      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border ${splitColor}" title="${splitTooltip}">
+        [split: ${app.splits.length}]
+      </span>
+    `;
+  }
+
+  // Secondary DEX badge
+  let secondaryDexBadge = '';
+  if (app.secondaryDex && app.secondaryDex.length > 0) {
+    const summary = app.secondaryDexSummary || {
+      total: app.secondaryDex.length,
+      optimizableCount: app.secondaryDex.filter((s) => s.isOptimizable).length,
+      restrictedCount: app.secondaryDex.filter((s) => s.isUnsupportedContext || s.isRemoved).length,
+      compiledCount: app.secondaryDex.filter((s) => s.status === 'speed' || s.status === 'speed-profile').length,
+    };
+
+    let secColor = 'border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300';
+    let secText = `[sec-dex: speed]`;
+    let secTooltip = `次要 DEX: 共 ${summary.total} 個 (${summary.compiledCount} 已最佳化)`;
+
+    if (summary.restrictedCount === summary.total) {
+      secColor = 'border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400';
+      secText = `[sec-dex: 受限 (${summary.total})]`;
+      secTooltip = `${summary.total} 個動態插件受 Android ART 規範限制 (UnsupportedClassLoaderContext)，維持 verify 不影響主效能`;
+    } else if (summary.optimizableCount > 0) {
+      secColor = 'border-amber-500/40 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300';
+      secText = `[sec-dex: 待最佳化 (${summary.optimizableCount})]`;
+      secTooltip = `含有 ${summary.optimizableCount} 個可編譯之次要 DEX，最佳化時將自動執行 --secondary-dex`;
+    }
+
+    secondaryDexBadge = `
+      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border ${secColor}" title="${secTooltip}">
+        ${secText}
+      </span>
+    `;
+  }
+
   // Profile readiness badge
   let profileBadge = '';
   if (isAotSupported) {
@@ -781,6 +834,8 @@ function createAppCardHtml(app) {
         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${reasonBadgeClass}">
           [reason=${app.reason}]
         </span>
+        ${splitBadge}
+        ${secondaryDexBadge}
         ${profileBadge}
         ${app.usageTimeFormatted ? `
         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border border-cyan-300 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 ml-auto" title="近期前景使用時間: ${app.usageTimeFormatted}">
@@ -1147,6 +1202,11 @@ async function refreshAppStatuses(targetMode, { wasCancelled = false, isSequenti
           if (info.hasCode === false) {
             app.hasCode = false;
           }
+          if (info.splits) app.splits = info.splits;
+          if (info.secondaryDex) app.secondaryDex = info.secondaryDex;
+          if (info.hasSecondaryDex !== undefined) app.hasSecondaryDex = info.hasSecondaryDex;
+          if (info.hasOptimizableSecondaryDex !== undefined) app.hasOptimizableSecondaryDex = info.hasOptimizableSecondaryDex;
+          if (info.secondaryDexSummary !== undefined) app.secondaryDexSummary = info.secondaryDexSummary;
 
           // If batch was speed-profile but app fell back to verify, switch button to speed
           if (targetMode === 'speed-profile' && app.status === 'verify') {
