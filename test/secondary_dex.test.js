@@ -69,7 +69,7 @@ test('adbController.compileApp automatically compiles secondary DEX when optimiz
 
   assert.strictEqual(executedCommands.length, 2);
   assert.deepStrictEqual(executedCommands[0].cmd, ['cmd', 'package', 'compile', '-m', 'speed-profile', 'jp.naver.line.android']);
-  assert.deepStrictEqual(executedCommands[1].cmd, ['cmd', 'package', 'compile', '-m', 'speed-profile', '--secondary-dex', 'jp.naver.line.android']);
+  assert.deepStrictEqual(executedCommands[1].cmd, ['cmd', 'package', 'compile', '-m', 'speed', '--secondary-dex', 'jp.naver.line.android']);
 
   // 3. autoSecondaryDex = false -> should NOT run secondary-dex command
   executedCommands.length = 0;

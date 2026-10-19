@@ -418,9 +418,12 @@ export class AdbController {
     const compileRes = await this.exec(compileCmd, { onOutput });
 
     // Issue #9 Problem 2: Auto-compile optimizable secondary DEX
+    // Note: Android ART does not maintain profile for secondary dex (dynamic jars),
+    // so compiling with 'speed-profile' will always fallback to 'verify'.
+    // Secondary dex MUST always be compiled with '-m speed'.
     if (autoSecondaryDex && (appInfo?.hasOptimizableSecondaryDex || appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
-      this.log('最佳化', `正在最佳化 [${packageName}] 之次要 DEX (--secondary-dex)...`);
-      const secCmd = ['cmd', 'package', 'compile', '-m', mode];
+      this.log('最佳化', `正在最佳化 [${packageName}] 之次要 DEX (--secondary-dex，模式: speed)...`);
+      const secCmd = ['cmd', 'package', 'compile', '-m', 'speed'];
       if (force) secCmd.push('-f');
       secCmd.push('--secondary-dex', packageName);
       try {
@@ -768,7 +771,7 @@ export class AdbController {
     await new Promise((r) => setTimeout(r, 600));
     let output = `Compiling ${packageName} with mode=${mode}${force ? ' -f' : ''} ...\nSuccess\n`;
     if (autoSecondaryDex && (appInfo?.hasOptimizableSecondaryDex || appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
-      output += `Compiling secondary dex for ${packageName} with mode=${mode}${force ? ' -f' : ''} --secondary-dex ...\nSuccess\n`;
+      output += `Compiling secondary dex for ${packageName} with mode=speed${force ? ' -f' : ''} --secondary-dex ...\nSuccess\n`;
     }
     onOutput?.(output, false);
     return {
@@ -778,7 +781,7 @@ export class AdbController {
       splits: appInfo?.splits || [],
       secondaryDex: (appInfo?.secondaryDex || []).map((s) => ({
         ...s,
-        status: s.isUnsupportedContext || s.isRemoved ? s.status : mode,
+        status: s.isUnsupportedContext || s.isRemoved ? s.status : 'speed',
         isOptimizable: false,
       })),
       hasSecondaryDex: appInfo?.hasSecondaryDex || false,
