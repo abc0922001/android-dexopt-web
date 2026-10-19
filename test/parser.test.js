@@ -729,3 +729,71 @@ test('classifyApps and sortApps accurately use priorityScore for card ranking an
   assert.strictEqual(sorted[0].packageName, 'app.daily.tool');
   assert.strictEqual(sorted[1].packageName, 'app.weekend.binge');
 });
+
+test('parseSinglePackageDexopt correctly ignores ContentProvider authorities and does not falsely mark app as no-code or N/A', () => {
+  const sample = `
+Activity Resolver Table:
+  Non-Data Actions:
+    android.intent.action.MAIN:
+      com.com2us.mlbgm.normal.freefull.google.global.android.common/com.com2us.module.manager.ModuleActivity
+
+ContentProvider Authorities:
+  [com.com2us.mlbgm.normal.freefull.google.global.android.common.firebaseinitprovider]:
+    Provider{ab74755 com.com2us.mlbgm.normal.freefull.google.global.android.common/com.google.firebase.provider.FirebaseInitProvider}
+      applicationInfo=ApplicationInfo{21074b2 com.com2us.mlbgm.normal.freefull.google.global.android.common}
+  [com.com2us.mlbgm.normal.freefull.google.global.android.common.provider]:
+    Provider{bfb56a4 com.com2us.mlbgm.normal.freefull.google.global.android.common/com.hive.base.FileProvider}
+      applicationInfo=ApplicationInfo{83c1c03 com.com2us.mlbgm.normal.freefull.google.global.android.common}
+
+Key Set Manager:
+  [com.com2us.mlbgm.normal.freefull.google.global.android.common]
+      Signing KeySets: 131
+
+Packages:
+  Package [com.com2us.mlbgm.normal.freefull.google.global.android.common] (70047a9):
+    appId=10309
+    pkg=Package{7b31a28 com.com2us.mlbgm.normal.freefull.google.global.android.common}
+    codePath=/data/app/~~c_53/com.com2us.mlbgm.normal.freefull.google.global.android.common-xyz==
+    installReason=2
+    usesLibraries:
+      (none)
+
+Dexopt state:
+  [com.com2us.mlbgm.normal.freefull.google.global.android.common]
+    path: /data/app/~~c_53/com.com2us.mlbgm.normal.freefull.google.global.android.common-xyz==/base.apk
+      arm64: [status=speed] [reason=cmdline] [primary-abi]
+        [location is /data/app/~~c_53/oat/arm64/base.odex]
+    known secondary dex files:
+      /data/user/0/com.com2us.mlbgm.normal.freefull.google.global.android.common/app_pccache/5/pcam.jar
+        arm64: [status=speed] [reason=cmdline] [primary-abi]
+`;
+
+  const parsed = parseSinglePackageDexopt(sample, 'com.com2us.mlbgm.normal.freefull.google.global.android.common');
+  assert.strictEqual(parsed.status, 'speed');
+  assert.strictEqual(parsed.reason, 'cmdline');
+  assert.strictEqual(parsed.hasCode, true);
+  assert.strictEqual(parsed.hasSecondaryDex, true);
+  assert.strictEqual(parsed.secondaryDex.length, 1);
+  assert.strictEqual(parsed.secondaryDex[0].status, 'speed');
+  assert.strictEqual(parsed.secondaryDex[0].reason, 'cmdline');
+});
+
+test('parseSinglePackageDexopt handles dumpsys where (none) is present under usesLibraryFiles without misclassifying as no-code', () => {
+  const sample = `
+Package [com.normal.app] (1234):
+  codePath=/data/app/~~123/com.normal.app-456==
+  usesLibraryFiles: (none)
+  installReason=0
+
+Dexopt state:
+  [com.normal.app]
+    path: /data/app/~~123/com.normal.app-456==/base.apk
+      arm64: [status=speed-profile] [reason=bg-dexopt]
+`;
+
+  const parsed = parseSinglePackageDexopt(sample, 'com.normal.app');
+  assert.strictEqual(parsed.status, 'speed-profile');
+  assert.strictEqual(parsed.reason, 'bg-dexopt');
+  assert.strictEqual(parsed.hasCode, true);
+});
+

@@ -71,6 +71,8 @@ export class AotQueueManager {
       id: this._nextId++,
       packageName: app.packageName,
       displayName: app.displayName || app.packageName,
+      path: app.path || '',
+      isSystem: !!app.isSystem,
       mode,
       status: 'waiting',
       queuedAt: Date.now(),
@@ -128,6 +130,27 @@ export class AotQueueManager {
    */
   clearFinished() {
     this.queue = this.queue.filter((i) => i.status === 'waiting' || i.status === 'running');
+    this.notifyChange();
+  }
+
+  /**
+   * Cancel tasks and completely clear queue records
+   * @param {{ cancelRunning?: boolean }} [options]
+   */
+  clearAll({ cancelRunning = false } = {}) {
+    for (const item of this.queue) {
+      if (item.status === 'waiting' || (cancelRunning && item.status === 'running')) {
+        item.status = 'cancelled';
+        item.completedAt = Date.now();
+        this.notifyItemStatusChange(item);
+      }
+    }
+    if (cancelRunning) {
+      this.queue = [];
+      this.isProcessing = false;
+    } else {
+      this.queue = this.queue.filter((i) => i.status === 'running');
+    }
     this.notifyChange();
   }
 

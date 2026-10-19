@@ -124,6 +124,7 @@ const el = {
   queueStatFailed: document.getElementById('queueStatFailed'),
   btnCancelAllPendingQueue: document.getElementById('btnCancelAllPendingQueue'),
   btnClearFinishedQueue: document.getElementById('btnClearFinishedQueue'),
+  btnClearAllQueue: document.getElementById('btnClearAllQueue'),
   queueTableBody: document.getElementById('queueTableBody'),
   queueEmptyState: document.getElementById('queueEmptyState'),
 
@@ -177,7 +178,7 @@ const adbController = new AdbController({
   onStatusChange: (status) => handleConnectionChange(status),
   onDeviceDisconnected: () => {
     showToast('裝置已中斷', 'USB 裝置連線已斷開。', 'warning');
-    queueManager.cancelAllPending();
+    queueManager.clearAll({ cancelRunning: true });
     renderDisconnectedState();
   },
 });
@@ -361,14 +362,25 @@ el.modeSpeedProfile.addEventListener('click', () => setDexoptMode('speed-profile
 
 function renderHeaderConnection() {
   if (state.connectedDevice) {
-    el.connectionContainer.innerHTML = `
-      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold shadow-sm">
+    const isDemo = adbController.isDemoMode;
+    const badgeHtml = isDemo
+      ? `<div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-300 text-xs font-semibold shadow-sm">
+        <span class="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+        <span class="font-bold tracking-wide">[示範模式] 虛擬 Pixel 8 (模擬環境)</span>
+        <button id="btnDisconnect" aria-label="結束示範模式 (Exit demo mode)" title="結束示範模式" class="ml-1 w-6 h-6 min-w-[24px] min-h-[24px] rounded hover:bg-purple-500/20 text-slate-400 hover:text-rose-400 cursor-pointer flex items-center justify-center">
+          ${ICONS.clear}
+        </button>
+      </div>`
+      : `<div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold shadow-sm">
         <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
         <span>Connected: ${state.connectedDevice.title}</span>
         <button id="btnDisconnect" aria-label="中斷裝置連線 (Disconnect device)" title="中斷連線" class="ml-1 w-6 h-6 min-w-[24px] min-h-[24px] rounded hover:bg-emerald-500/20 text-slate-400 hover:text-rose-400 cursor-pointer flex items-center justify-center">
           ${ICONS.clear}
         </button>
-      </div>
+      </div>`;
+
+    el.connectionContainer.innerHTML = `
+      ${badgeHtml}
       <button id="btnRescan" aria-label="重新掃描裝置應用 (Rescan apps)" title="重新掃描裝置" class="w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer flex items-center justify-center">
         ${ICONS.refresh}
       </button>
@@ -415,6 +427,7 @@ function handleConnectionChange({ state: connState, device, message }) {
 }
 
 function renderDisconnectedState() {
+  queueManager.clearAll({ cancelRunning: true });
   state.connectedDevice = null;
   state.apps = { frequentlyUsed: [], general: [], cannotAot: [] };
   renderHeaderConnection();
@@ -427,6 +440,7 @@ function renderDisconnectedState() {
 
 async function handleConnect() {
   try {
+    queueManager.clearAll({ cancelRunning: true });
     await adbController.connect();
   } catch (err) {
     showToast('連線失敗', err.message, 'error');
@@ -436,6 +450,7 @@ async function handleConnect() {
 
 async function handleDemoMode() {
   try {
+    queueManager.clearAll({ cancelRunning: true });
     await adbController.enableDemoMode();
     showToast('示範模式已啟動', '已載入 Pixel 8 模擬環境，可自由測試模式切換與編譯。', 'info');
   } catch (err) {
@@ -1896,12 +1911,19 @@ function updateQueueUi(items = queueManager.items) {
             actionCell = `<span class="text-slate-400 text-[10px]">-</span>`;
           }
 
+          const typeBadge = item.isSystem
+            ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shrink-0" title="${escapeHtml(item.path || '系統預載應用')}">系統預載</span>`
+            : `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60 shrink-0" title="${escapeHtml(item.path || '用戶安裝應用')}">用戶安裝</span>`;
+
           return `
             <tr class="hover:bg-slate-100/50 dark:hover:bg-slate-800/40 transition-colors">
               <td class="py-2.5 px-3 whitespace-nowrap">${statusBadge}</td>
               <td class="py-2.5 px-3 min-w-0">
-                <div class="font-medium text-slate-900 dark:text-slate-100 truncate">${escapeHtml(item.displayName)}</div>
-                <div class="text-[10px] text-slate-400 font-mono truncate flex items-center gap-1">
+                <div class="font-medium text-slate-900 dark:text-slate-100 truncate flex items-center gap-1.5">
+                  <span class="truncate">${escapeHtml(item.displayName)}</span>
+                  ${typeBadge}
+                </div>
+                <div class="text-[10px] text-slate-400 font-mono truncate flex items-center gap-1" title="${escapeHtml(item.path || item.packageName)}">
                   <span class="truncate min-w-0">${escapeHtml(item.packageName)}</span>
                   ${createGoogleSearchLink(item.packageName)}
                 </div>
@@ -1963,6 +1985,11 @@ el.btnCancelAllPendingQueue?.addEventListener('click', () => {
 el.btnClearFinishedQueue?.addEventListener('click', () => {
   queueManager.clearFinished();
   showToast('已清除紀錄', '已清空已完成與已取消的歷史任務紀錄。', 'info');
+});
+
+el.btnClearAllQueue?.addEventListener('click', () => {
+  queueManager.clearAll();
+  showToast('已清空佇列', 'AOT 執行佇列所有歷史記錄已全數清除。', 'info');
 });
 
 /* ---------------- Fast AOT Listeners ---------------- */

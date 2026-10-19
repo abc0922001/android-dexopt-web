@@ -335,11 +335,12 @@ export function parseDumpsysPackageStream(text) {
   let inSecondaryDexSection = false;
   let currentSubItem = null; // { type: 'primary' | 'split' | 'secondary', path: string, ... }
   let inDexoptSection = false;
+  let inIgnoredSection = false;
 
-  const pkgStartRegex = /^(?:\s*Package\s*\[|\s*\[|\s*Package:\s*)(?<pkg>[a-zA-Z0-9_\.]+)[\]\:]/i;
+  const pkgStartRegex = /^(?:\s*Package\s*\[(?<pkg>[a-zA-Z0-9_\.]+)\]|\s*\[(?<pkg2>[a-zA-Z0-9_\.]+)\](?!\:)|\s*Package:\s*(?<pkg3>[a-zA-Z0-9_\.]+))/i;
   const patternBrackets = /\[status=(?<status>[a-zA-Z0-9_-]+)\](?:\s+\[reason=(?<reason>[a-zA-Z0-9_-]+)\])?/i;
-  const patternFilter = /(?:compilation[-_\s]*filter|status)[=:\s]+(?<status>[a-zA-Z0-9_-]+)/i;
-  const patternReason = /(?:compilation[-_\s]*reason|reason)[=:\s]+(?<reason>[a-zA-Z0-9_-]+)/i;
+  const patternFilter = /(?:compilation[-_\s]*filter|\bstatus)[=:\s]+(?<status>[a-zA-Z0-9_-]+)/i;
+  const patternReason = /(?:compilation[-_\s]*reason|\breason)[=:\s]+(?<reason>[a-zA-Z0-9_-]+)/i;
 
   const finalizePreviousInfo = () => {
     if (!currentInfo) return;
@@ -353,10 +354,12 @@ export function parseDumpsysPackageStream(text) {
       if (currentInfo.status === 'unknown') currentInfo.status = 'N/A';
       if (currentInfo.reason === 'unknown') currentInfo.reason = 'no-code';
     } else if (currentInfo.inDexoptSection && currentInfo.pathCount === 0 && !currentInfo.hasPrimaryStatus) {
-      currentInfo.hasCode = false;
-      currentInfo.isOverlay = true;
-      currentInfo.status = 'N/A';
-      currentInfo.reason = 'no-code';
+      if (currentInfo.hasCode === false || isNoCodeOrOverlayPackage(currentInfo.packageName)) {
+        currentInfo.hasCode = false;
+        currentInfo.isOverlay = true;
+        currentInfo.status = 'N/A';
+        currentInfo.reason = 'no-code';
+      }
     }
 
     // Summarize secondary DEX items if present
@@ -397,15 +400,26 @@ export function parseDumpsysPackageStream(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
+    // Filter out non-package section blocks in dumpsys package (e.g. ContentProvider Authorities, Key Sets)
+    if (/^(?:ContentProvider Authorities|Key Set Manager|Permissions|Features|Shared users):/i.test(line.trim())) {
+      inIgnoredSection = true;
+      continue;
+    }
+    if (/^(?:Packages:|Dexopt state:)/i.test(line.trim())) {
+      inIgnoredSection = false;
+    }
+
     if (/^Dexopt state:/i.test(line.trim())) {
       inDexoptSection = true;
     }
 
+    if (inIgnoredSection) continue;
+
     const pkgMatch = line.match(pkgStartRegex);
-    if (pkgMatch && pkgMatch.groups && pkgMatch.groups.pkg) {
-      const candidatePkg = pkgMatch.groups.pkg;
+    if (pkgMatch && pkgMatch.groups) {
+      const candidatePkg = pkgMatch.groups.pkg || pkgMatch.groups.pkg2 || pkgMatch.groups.pkg3;
       // Filter out non-package identifiers (e.g. instruction sets or paths)
-      if (candidatePkg.includes('.') && !candidatePkg.startsWith('http')) {
+      if (candidatePkg && candidatePkg.includes('.') && !candidatePkg.startsWith('http')) {
         finalizePreviousInfo();
         currentInfo = getOrCreateInfo(candidatePkg);
         if (inDexoptSection || /^\s*\[[a-zA-Z0-9_\.]+\]/i.test(line)) {
@@ -419,7 +433,7 @@ export function parseDumpsysPackageStream(text) {
 
     if (!currentInfo) continue;
 
-    if (line.includes('hasCode=false') || line.includes('apk does not have code') || line.includes('(none)')) {
+    if (line.includes('hasCode=false') || line.includes('apk does not have code') || (inDexoptSection && /^\s*\(none\)\s*$/i.test(line))) {
       currentInfo.hasCode = false;
     }
 
@@ -541,9 +555,10 @@ export function parseDumpsysPackageStream(text) {
 /**
  * Parse a single package's dumpsys output (for partial re-query after compile)
  * @param {string} text
+ * @param {string} [expectedPackage] Optional package name to retrieve from streamMap
  * @returns {{ status: string, reason: string, hasCode: boolean, splits: Array<object>, secondaryDex: Array<object>, hasSecondaryDex: boolean, hasOptimizableSecondaryDex: boolean, secondaryDexSummary: object|null }}
  */
-export function parseSinglePackageDexopt(text) {
+export function parseSinglePackageDexopt(text, expectedPackage = null) {
   const result = {
     status: 'unknown',
     reason: 'unknown',
@@ -557,23 +572,29 @@ export function parseSinglePackageDexopt(text) {
 
   if (!text) return result;
 
-  if (text.includes('hasCode=false') || text.includes('apk does not have code') || text.includes('(none)')) {
+  if (text.includes('hasCode=false') || text.includes('apk does not have code')) {
     result.hasCode = false;
   }
 
   // Use parseDumpsysPackageStream to ensure 100% parsing parity with batch scanning
   const streamMap = parseDumpsysPackageStream(text);
   if (streamMap.size > 0) {
-    const firstInfo = streamMap.values().next().value;
-    if (firstInfo) {
-      result.status = firstInfo.status;
-      result.reason = firstInfo.reason;
-      result.hasCode = firstInfo.hasCode;
-      result.splits = firstInfo.splits;
-      result.secondaryDex = firstInfo.secondaryDex;
-      result.hasSecondaryDex = firstInfo.hasSecondaryDex;
-      result.hasOptimizableSecondaryDex = firstInfo.hasOptimizableSecondaryDex;
-      result.secondaryDexSummary = firstInfo.secondaryDexSummary;
+    let targetInfo = null;
+    if (expectedPackage && streamMap.has(expectedPackage)) {
+      targetInfo = streamMap.get(expectedPackage);
+    } else {
+      targetInfo = streamMap.values().next().value;
+    }
+
+    if (targetInfo) {
+      result.status = targetInfo.status;
+      result.reason = targetInfo.reason;
+      result.hasCode = targetInfo.hasCode;
+      result.splits = targetInfo.splits;
+      result.secondaryDex = targetInfo.secondaryDex;
+      result.hasSecondaryDex = targetInfo.hasSecondaryDex;
+      result.hasOptimizableSecondaryDex = targetInfo.hasOptimizableSecondaryDex;
+      result.secondaryDexSummary = targetInfo.secondaryDexSummary;
       return result;
     }
   }
@@ -585,12 +606,12 @@ export function parseSinglePackageDexopt(text) {
     return result;
   }
 
-  const filterMatch = text.match(/(?:compilation[-_\s]*filter|status)[=:\s]+(?<status>[a-zA-Z0-9_-]+)/i);
+  const filterMatch = text.match(/(?:compilation[-_\s]*filter|\bstatus)[=:\s]+(?<status>[a-zA-Z0-9_-]+)/i);
   if (filterMatch && filterMatch.groups && filterMatch.groups.status) {
     result.status = filterMatch.groups.status;
   }
 
-  const reasonMatch = text.match(/(?:compilation[-_\s]*reason|reason)[=:\s]+(?<reason>[a-zA-Z0-9_-]+)/i);
+  const reasonMatch = text.match(/(?:compilation[-_\s]*reason|\breason)[=:\s]+(?<reason>[a-zA-Z0-9_-]+)/i);
   if (reasonMatch && reasonMatch.groups && reasonMatch.groups.reason) {
     result.reason = reasonMatch.groups.reason;
   }

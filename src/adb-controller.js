@@ -442,8 +442,15 @@ export class AdbController {
     // Partial re-query with dumpsys package <packageName>
     this.log('狀態更新', `重新擷取 [${packageName}] 之最新狀態...`);
     const dumpRes = await this.exec(['dumpsys', 'package', packageName]);
-    const updated = parseSinglePackageDexopt(dumpRes.stdout);
+    const updated = parseSinglePackageDexopt(dumpRes.stdout, packageName);
     
+    // Safety fallback: if command execution succeeded, never degrade a valid app to N/A / no-code
+    if (updated.status === 'unknown' || updated.status === 'N/A') {
+      updated.status = mode;
+      updated.reason = 'cmdline';
+      updated.hasCode = true;
+    }
+
     this.log('完成', `[${packageName}] 已更新為 status=${updated.status} reason=${updated.reason}`);
     return updated;
   }
@@ -793,7 +800,7 @@ export class AdbController {
       `Compiling: jp.naver.line.android [status=${mode}]`,
       `Compiling: com.android.chrome.beta [status=${mode}]`,
       `Compiling: com.google.android.youtube [status=${mode}]`,
-      `Compiling: com.spotify.music [status=${mode}]`,
+      `Compiling: com.google.android.apps.maps [status=${mode}]`,
       `Compiling: com.google.android.calendar [status=${mode}]`,
       `Compiling: com.google.android.gm [status=${mode}]`,
       `Compilation finished for all packages. dexopt completed successfully.`,
@@ -926,9 +933,9 @@ export class AdbController {
         hasSecondaryDex: false,
       },
       {
-        packageName: 'com.spotify.music',
-        displayName: 'Spotify',
-        path: '/data/app/com.spotify.music/base.apk',
+        packageName: 'com.google.android.apps.maps',
+        displayName: 'Google Maps',
+        path: '/data/app/com.google.android.apps.maps/base.apk',
         isSystem: false,
         status: 'speed',
         reason: 'cmdline',
