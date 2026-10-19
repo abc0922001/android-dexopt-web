@@ -832,6 +832,7 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '2h 45m',
+        priorityScore: 2.85,
         splits: [],
         secondaryDex: [],
         hasSecondaryDex: false,
@@ -850,6 +851,7 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '1h 30m',
+        priorityScore: 2.40,
         splits: [],
         secondaryDex: [
           {
@@ -892,6 +894,7 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '54m',
+        priorityScore: 2.15,
         splits: [],
         secondaryDex: [],
         hasSecondaryDex: false,
@@ -910,6 +913,7 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '48m',
+        priorityScore: 2.05,
         splits: [
           {
             name: 'split_config.arm64_v8a.apk',
@@ -935,6 +939,7 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '35m',
+        priorityScore: 1.82,
       },
       {
         packageName: 'org.telegram.messenger',
@@ -950,6 +955,7 @@ export class AdbController {
         isCannotAot: false,
         tier: 'frequently_used',
         usageTimeFormatted: '22m',
+        priorityScore: 1.54,
       },
     ];
 

@@ -120,13 +120,69 @@ export function isNoCodeOrOverlayPackage(pkg) {
 }
 
 /**
+ * Calculates multi-scale log-decay priority score for AOT compilation ordering
+ * based on usage time across daily, weekly, monthly, and yearly intervals.
+ * 
+ * 步驟一：差分去重疊 (De-accumulation)
+ * ΔT_D = T_D
+ * ΔT_W = max(0, T_W - T_D)
+ * ΔT_M = max(0, T_M - T_W)
+ * ΔT_Y = max(0, T_Y - T_M)
+ * 
+ * 步驟二：日均強度正規化 (Daily Usage Rate，分鐘/天)
+ * R_D = ΔT_D / (1 * 60,000)
+ * R_W = ΔT_W / (6 * 60,000)      (扣除當日後之 6 天)
+ * R_M = ΔT_M / (23 * 60,000)     (扣除當週後之 23 天)
+ * R_Y = ΔT_Y / (335 * 60,000)    (扣除當月後之 335 天)
+ * 
+ * 步驟三：對數邊際效用加權計分 (Priority Score)
+ * PriorityScore = 0.45 * ln(1 + R_D) + 0.30 * ln(1 + R_W) + 0.15 * ln(1 + R_M) + 0.10 * ln(1 + R_Y)
+ * 
+ * @param {{ dailyMs?: number, weeklyMs?: number, monthlyMs?: number, yearlyMs?: number, foregroundMs?: number }} intervals
+ * @returns {number} PriorityScore (non-negative, rounded to 4 decimal places)
+ */
+export function calculateUsagePriorityScore({ dailyMs = 0, weeklyMs = 0, monthlyMs = 0, yearlyMs = 0, foregroundMs = 0 } = {}) {
+  let TD = Math.max(0, dailyMs || 0);
+  let TW = Math.max(0, weeklyMs || 0);
+  let TM = Math.max(0, monthlyMs || 0);
+  let TY = Math.max(0, yearlyMs || 0);
+
+  // If all intervals are 0 but a legacy/fallback foregroundMs is provided, treat it as weeklyMs
+  if (TD === 0 && TW === 0 && TM === 0 && TY === 0 && foregroundMs > 0) {
+    TW = foregroundMs;
+  }
+
+  // 步驟一：差分去重疊 (De-accumulation)
+  const deltaTD = TD;
+  const deltaTW = Math.max(0, TW - TD);
+  const deltaTM = Math.max(0, TM - TW);
+  const deltaTY = Math.max(0, TY - TM);
+
+  // 步驟二：日均強度正規化 (Daily Usage Rate, in minutes/day)
+  const RD = deltaTD / (1 * 60000);
+  const RW = deltaTW / (6 * 60000);
+  const RM = deltaTM / (23 * 60000);
+  const RY = deltaTY / (335 * 60000);
+
+  // 步驟三：對數邊際效用加權計分 (Priority Score)
+  const priorityScore = (
+    0.45 * Math.log(1 + RD) +
+    0.30 * Math.log(1 + RW) +
+    0.15 * Math.log(1 + RM) +
+    0.10 * Math.log(1 + RY)
+  );
+
+  return Number(priorityScore.toFixed(4));
+}
+
+/**
  * Parse output of `dumpsys usagestats`
  * Extracts packages that have recorded foreground time across multiple intervals:
  * daily, weekly, monthly, and yearly stats.
- * Computes a weighted recent activity score and prioritizes weekly stats for card display.
+ * Computes multi-scale log-decay priority score and prioritizes weekly stats for card display.
  * 
  * @param {string} text
- * @returns {Map<string, { foregroundMs: number, weeklyMs: number, monthlyMs: number, dailyMs: number, yearlyMs: number, weightedScore: number }>}
+ * @returns {Map<string, { foregroundMs: number, weeklyMs: number, monthlyMs: number, dailyMs: number, yearlyMs: number, priorityScore: number, weightedScore: number }>}
  */
 export function parseUsageStats(text) {
   const usageMap = new Map();
@@ -144,6 +200,7 @@ export function parseUsageStats(text) {
         monthlyMs: 0,
         dailyMs: 0,
         yearlyMs: 0,
+        priorityScore: 0,
         weightedScore: 0,
       });
     }
@@ -202,7 +259,7 @@ export function parseUsageStats(text) {
     }
   }
 
-  // Calculate final foregroundMs and weighted activity score
+  // Calculate final foregroundMs, priorityScore, and weighted activity score
   for (const [pkg, record] of usageMap.entries()) {
     // Card display prioritizes weekly; fallbacks to monthly -> daily -> yearly
     if (record.weeklyMs > 0) {
@@ -217,13 +274,12 @@ export function parseUsageStats(text) {
       record.foregroundMs = 0;
     }
 
-    // Weighted activity score: Weekly * 3 + Monthly * 1 + Daily * 2 + capped Yearly bonus
-    record.weightedScore = (record.weeklyMs * 3) +
-                           (record.monthlyMs * 1) +
-                           (record.dailyMs * 2) +
-                           Math.min(record.yearlyMs, 3600000 * 5) * 0.05;
+    // App 使用頻率多尺度對數衰減評分公式（AOT 編譯優先級排序）
+    record.priorityScore = calculateUsagePriorityScore(record);
+    // Maintain weightedScore backward compatibility with tests
+    record.weightedScore = record.priorityScore;
 
-    if (record.foregroundMs === 0 && record.weightedScore === 0) {
+    if (record.foregroundMs === 0 && record.priorityScore === 0) {
       usageMap.delete(pkg);
     }
   }
@@ -569,11 +625,20 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     return 0;
   };
 
-  const getWeightedScore = (pkg) => {
+  const getPriorityScore = (pkg) => {
     if (usageData instanceof Map) {
-      return usageData.get(pkg)?.weightedScore || usageData.get(pkg)?.foregroundMs || 0;
+      const u = usageData.get(pkg);
+      if (!u) return 0;
+      if (typeof u.priorityScore === 'number') return u.priorityScore;
+      if (typeof u.weightedScore === 'number') {
+        return u.weightedScore > 20 ? calculateUsagePriorityScore(u) : u.weightedScore;
+      }
+      return calculateUsagePriorityScore(u);
     }
-    return getUsageMs(pkg);
+    if (usageData instanceof Set) {
+      return usageData.has(pkg) ? 1.0 : 0;
+    }
+    return 0;
   };
 
   for (const pkgItem of packageList) {
@@ -600,6 +665,7 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     );
 
     const foregroundMs = getUsageMs(pkg);
+    const priorityScore = getPriorityScore(pkg);
     const isLauncherApp = launcherSet.has(pkg);
 
     // 初始狀態下不預先判定 Profile，所有 App 均為未檢查狀態 (undefined)，
@@ -621,6 +687,7 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
       isCannotAot,
       isOptimizing: false,
       foregroundMs,
+      priorityScore,
       usageTimeFormatted: formatUsageDuration(foregroundMs),
       isLauncherApp,
       splits: dexopt.splits || [],
@@ -639,15 +706,15 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
   }
 
   // Calculate usage score to find truly frequently used apps:
-  // 1. Weighted recent activity score (Weekly*3 + Monthly*1 + Daily*2) is the primary factor.
-  // 2. User launcher apps get priority over background services.
-  // 3. User-installed apps get priority over system apps.
+  // 1. Multi-scale log-decay priority score is the primary factor.
+  // 2. User launcher apps get priority over background services (+0.35 boost).
+  // 3. User-installed background apps get minor priority (+0.10 boost).
   const scored = candidates.map((app) => {
-    let score = getWeightedScore(app.packageName);
+    let score = app.priorityScore;
     if (app.isLauncherApp && !app.isSystem) {
-      score += 180000; // 3 min boost for user launcher apps
+      score += 0.35; // 0.35 boost on log-utility scale for user launcher apps
     } else if (!app.isSystem) {
-      score += 60000;  // 1 min boost for user-installed apps
+      score += 0.10; // 0.10 boost for user-installed apps
     }
     return { app, score };
   });
@@ -677,11 +744,14 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     // are strictly excluded from Frequently Used!
     const isSystemBackgroundService = app.isSystem && !app.isLauncherApp;
 
+    const satisfiesMinThreshold = minForegroundMs > 0
+      ? (app.foregroundMs >= minForegroundMs || item.score >= minForegroundMs)
+      : item.score > 0;
+
     if (
       !isSystemBackgroundService &&
       frequentlyUsed.length < maxFrequentlyUsed &&
-      item.score >= minForegroundMs &&
-      item.score > 0
+      satisfiesMinThreshold
     ) {
       app.tier = 'frequently_used';
       frequentlyUsed.push(app);
@@ -721,8 +791,16 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     }
   }
 
-  // Frequently used sorted by actual usage time descending (most used first!), then name
-  frequentlyUsed.sort((a, b) => (b.foregroundMs - a.foregroundMs) || a.displayName.localeCompare(b.displayName));
+  // Frequently used sorted by multi-scale log-decay priorityScore descending (AOT compilation priority!), then foregroundMs, then name
+  frequentlyUsed.sort((a, b) => {
+    const scoreA = typeof a.priorityScore === 'number' ? a.priorityScore : 0;
+    const scoreB = typeof b.priorityScore === 'number' ? b.priorityScore : 0;
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    if ((b.foregroundMs || 0) !== (a.foregroundMs || 0)) {
+      return (b.foregroundMs || 0) - (a.foregroundMs || 0);
+    }
+    return a.displayName.localeCompare(b.displayName);
+  });
 
   // General apps sorted alphabetically
   const sorter = (a, b) => a.displayName.localeCompare(b.displayName);
@@ -886,7 +964,15 @@ export function sortApps(apps, sortMode = 'default') {
       return list.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
     case 'usage_desc':
-      return list.sort((a, b) => (b.foregroundMs || 0) - (a.foregroundMs || 0) || a.displayName.localeCompare(b.displayName));
+      return list.sort((a, b) => {
+        const scoreA = typeof a.priorityScore === 'number' ? a.priorityScore : 0;
+        const scoreB = typeof b.priorityScore === 'number' ? b.priorityScore : 0;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        if ((b.foregroundMs || 0) !== (a.foregroundMs || 0)) {
+          return (b.foregroundMs || 0) - (a.foregroundMs || 0);
+        }
+        return a.displayName.localeCompare(b.displayName);
+      });
 
     case 'profile_ready_first':
       return list.sort((a, b) => {

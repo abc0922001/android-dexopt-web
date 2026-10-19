@@ -12,6 +12,7 @@ import {
   formatDisplayName,
   getStatusPriority,
   sortApps,
+  calculateUsagePriorityScore,
 } from '../src/parser.js';
 
 test('parsePackageList correctly parses third party and system packages', () => {
@@ -580,6 +581,151 @@ test('classifyApps strictly excludes system background services without launcher
   assert.ok(frequentPkgs.includes('com.android.chrome'));
 });
 
+test('calculateUsagePriorityScore accurately calculates de-accumulated normalized log-utility score', () => {
+  // Test 1: Inactive App (all 0)
+  assert.strictEqual(calculateUsagePriorityScore({ dailyMs: 0, weeklyMs: 0, monthlyMs: 0, yearlyMs: 0 }), 0);
 
+  // Test 2: App used 60 minutes today only (all cumulative windows equal 60 minutes)
+  // TD = 60m -> deltaTD = 60m -> RD = 60
+  // TW = 60m -> deltaTW = max(0, 60m - 60m) = 0 -> RW = 0
+  // TM = 60m -> deltaTM = 0 -> RM = 0
+  // TY = 60m -> deltaTY = 0 -> RY = 0
+  // PriorityScore = 0.45 * ln(1 + 60) + 0 + 0 + 0 = 0.45 * 4.110874 = 1.8499
+  const scoreToday60m = calculateUsagePriorityScore({
+    dailyMs: 60 * 60000,
+    weeklyMs: 60 * 60000,
+    monthlyMs: 60 * 60000,
+    yearlyMs: 60 * 60000,
+  });
+  assert.strictEqual(scoreToday60m, 1.8499);
 
+  // Test 3: Steady daily user (10 min/day throughout the entire year)
+  // TD = 10m -> deltaTD = 10m -> RD = 10
+  // TW = 70m -> deltaTW = 60m -> RW = 60 / 6 = 10
+  // TM = 300m -> deltaTM = 230m -> RM = 230 / 23 = 10
+  // TY = 3650m -> deltaTY = 3350m -> RY = 3350 / 335 = 10
+  // PriorityScore = (0.45 + 0.30 + 0.15 + 0.10) * ln(1 + 10) = 1.0 * ln(11) = 2.3979
+  const scoreSteadyDaily = calculateUsagePriorityScore({
+    dailyMs: 10 * 60000,
+    weeklyMs: 70 * 60000,
+    monthlyMs: 300 * 60000,
+    yearlyMs: 3650 * 60000,
+  });
+  assert.strictEqual(scoreSteadyDaily, 2.3979);
 
+  // Test 4: Weekend binge user (10 hours on a single weekend day, 0 daily)
+  // TD = 0 -> deltaTD = 0 -> RD = 0
+  // TW = 600m -> deltaTW = 600m -> RW = 600 / 6 = 100
+  // TM = 600m -> deltaTM = 0 -> RM = 0
+  // TY = 600m -> deltaTY = 0 -> RY = 0
+  // PriorityScore = 0.30 * ln(1 + 100) = 0.30 * ln(101) = 1.3845
+  const scoreWeekendBinge = calculateUsagePriorityScore({
+    dailyMs: 0,
+    weeklyMs: 600 * 60000,
+    monthlyMs: 600 * 60000,
+    yearlyMs: 600 * 60000,
+  });
+  assert.strictEqual(scoreWeekendBinge, 1.3845);
+
+  // Crucial Property: Steady everyday communication tool (2.3979) outranks sporadic 10h binge (1.3845)!
+  assert.ok(scoreSteadyDaily > scoreWeekendBinge);
+
+  // Test 5: Fallback when only foregroundMs is supplied (legacy/fallback mode)
+  const scoreFallback = calculateUsagePriorityScore({ foregroundMs: 60 * 60000 });
+  // treated as weeklyMs = 60m -> RW = 60/6 = 10 -> 0.30 * ln(11) = 0.7194
+  assert.strictEqual(scoreFallback, 0.7194);
+});
+
+test('calculateUsagePriorityScore handles dumpsys reporting anomalies without negative or NaN outputs', () => {
+  // Anomaly: TW < TD due to rolling window reset
+  const scoreAnomaly = calculateUsagePriorityScore({
+    dailyMs: 50 * 60000,
+    weeklyMs: 30 * 60000, // smaller than daily
+    monthlyMs: 100 * 60000,
+    yearlyMs: 200 * 60000,
+  });
+  assert.ok(scoreAnomaly > 0);
+  assert.strictEqual(Number.isNaN(scoreAnomaly), false);
+
+  // Undefined / empty input
+  assert.strictEqual(calculateUsagePriorityScore(), 0);
+  assert.strictEqual(calculateUsagePriorityScore({}), 0);
+});
+
+test('parseUsageStats populates priorityScore and maintains weightedScore compatibility', () => {
+  const sample = `
+  In-memory daily stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="10:00" appLaunchCount=15
+  In-memory weekly stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="1:10:00" appLaunchCount=100
+  In-memory monthly stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="5:00:00" appLaunchCount=400
+  In-memory yearly stats
+    packages
+      package=jp.naver.line.android totalTimeUsed="60:50:00" appLaunchCount=4500
+  `;
+
+  const map = parseUsageStats(sample);
+  assert.ok(map.has('jp.naver.line.android'));
+  const line = map.get('jp.naver.line.android');
+
+  assert.ok(typeof line.priorityScore === 'number');
+  assert.ok(line.priorityScore > 0);
+  assert.strictEqual(line.weightedScore, line.priorityScore);
+});
+
+test('classifyApps and sortApps accurately use priorityScore for card ranking and usage_desc sorting', () => {
+  const pkgList = [
+    { packageName: 'app.daily.tool', path: '/data/app/tool.apk', isSystem: false },
+    { packageName: 'app.weekend.binge', path: '/data/app/binge.apk', isSystem: false },
+    { packageName: 'app.zero', path: '/data/app/zero.apk', isSystem: false },
+  ];
+
+  const usageMap = new Map([
+    // Daily steady tool: 10m daily, 70m weekly, 300m monthly, 3650m yearly -> PriorityScore = 2.3979
+    ['app.daily.tool', {
+      dailyMs: 10 * 60000,
+      weeklyMs: 70 * 60000,
+      monthlyMs: 300 * 60000,
+      yearlyMs: 3650 * 60000,
+      foregroundMs: 70 * 60000,
+      priorityScore: 2.3979,
+    }],
+    // Weekend binge app: 0 daily, 600m weekly, 600m monthly, 600m yearly -> PriorityScore = 1.3845
+    ['app.weekend.binge', {
+      dailyMs: 0,
+      weeklyMs: 600 * 60000,
+      monthlyMs: 600 * 60000,
+      yearlyMs: 600 * 60000,
+      foregroundMs: 600 * 60000, // has higher foregroundMs (10h vs 70m), but lower priorityScore!
+      priorityScore: 1.3845,
+    }],
+  ]);
+
+  const launcherSet = new Set(['app.daily.tool', 'app.weekend.binge', 'app.zero']);
+  const dexoptMap = new Map();
+
+  const { frequentlyUsed } = classifyApps(pkgList, usageMap, launcherSet, dexoptMap, {
+    maxFrequentlyUsed: 5,
+  });
+
+  // Verify appRecord retains priorityScore
+  const toolApp = frequentlyUsed.find((a) => a.packageName === 'app.daily.tool');
+  const bingeApp = frequentlyUsed.find((a) => a.packageName === 'app.weekend.binge');
+  assert.ok(toolApp);
+  assert.ok(bingeApp);
+  assert.strictEqual(toolApp.priorityScore, 2.3979);
+  assert.strictEqual(bingeApp.priorityScore, 1.3845);
+
+  // In frequentlyUsed ranking, daily steady tool ranks first because of higher priorityScore
+  assert.strictEqual(frequentlyUsed[0].packageName, 'app.daily.tool');
+  assert.strictEqual(frequentlyUsed[1].packageName, 'app.weekend.binge');
+
+  // Verify sortApps with 'usage_desc' sorts by priorityScore descending
+  const sorted = sortApps([bingeApp, toolApp], 'usage_desc');
+  assert.strictEqual(sorted[0].packageName, 'app.daily.tool');
+  assert.strictEqual(sorted[1].packageName, 'app.weekend.binge');
+});
