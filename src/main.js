@@ -806,6 +806,24 @@ function createAppCardHtml(app) {
     `;
   }
 
+  // Usage & Priority badges (Issue #9: only render when usage history exists, keep clean when 0)
+  const hasUsageHistory = (typeof app.foregroundMs === 'number' && app.foregroundMs > 0) || Boolean(app.usageTimeFormatted);
+  let usageBadgesHtml = '';
+  if (hasUsageHistory) {
+    const timeDisplay = app.usageTimeFormatted || '< 1m';
+    const priorityDisplay = typeof app.priorityScore === 'number' && app.priorityScore > 0 ? app.priorityScore.toFixed(2) : null;
+    usageBadgesHtml = `
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border border-cyan-300 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 ml-auto" title="近期前景使用時間: ${timeDisplay}${priorityDisplay ? ` (AOT 優先評分: ${priorityDisplay})` : ''}">
+        ⏱️ ${timeDisplay}
+      </span>
+      ${priorityDisplay ? `
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300" title="AOT 編譯多尺度優先級評分: ${priorityDisplay}">
+        ⚡ 優先級: ${priorityDisplay}
+      </span>
+      ` : ''}
+    `;
+  }
+
   return `
     <div id="card-${app.packageName.replace(/\./g, '_')}" class="app-card bg-white dark:bg-[#131d2e] border border-slate-200/90 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700/80 rounded-2xl p-4 shadow-sm transition-all flex flex-col justify-between gap-3">
       <div class="app-card-header">
@@ -852,11 +870,7 @@ function createAppCardHtml(app) {
         ${splitBadge}
         ${secondaryDexBadge}
         ${profileBadge}
-        ${app.usageTimeFormatted ? `
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border border-cyan-300 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 ml-auto" title="近期前景使用時間: ${app.usageTimeFormatted}${typeof app.priorityScore === 'number' && app.priorityScore > 0 ? ` (AOT 優先評分: ${app.priorityScore.toFixed(2)})` : ''}">
-          ⏱️ ${app.usageTimeFormatted}
-        </span>
-        ` : ''}
+        ${usageBadgesHtml}
       </div>
     </div>
   `;
