@@ -6,7 +6,7 @@ import { APP_VERSION, getFormattedVersion } from './version.js';
 
 // Application State
 const state = {
-  dexoptMode: 'speed-profile', // 'speed' | 'speed-profile'
+  dexoptMode: 'speed', // 'speed' | 'speed-profile'
   currentFilter: 'all',        // 'all' | 'frequently_used' | 'general' | 'cannot_aot'
   searchQuery: '',
   sortOrder: 'default',        // 'default' | 'status_unknown_first' | 'status_speed_first' | 'name_asc' | 'usage_desc'
@@ -152,14 +152,13 @@ const el = {
   disconnectedState: document.getElementById('disconnectedState'),
   appListContainer: document.getElementById('appListContainer'),
 
-  sectionFrequentlyUsed: document.getElementById('sectionFrequentlyUsed'),
-  sectionGeneral: document.getElementById('sectionGeneral'),
+  sectionApps: document.getElementById('sectionApps'),
+  gridApps: document.getElementById('gridApps'),
+  labelAppsTitle: document.getElementById('labelAppsTitle'),
+  labelAppsSubtitle: document.getElementById('labelAppsSubtitle'),
+  labelAppsCount: document.getElementById('labelAppsCount'),
   sectionCannotAot: document.getElementById('sectionCannotAot'),
-  gridFrequentlyUsed: document.getElementById('gridFrequentlyUsed'),
-  gridGeneral: document.getElementById('gridGeneral'),
   gridCannotAot: document.getElementById('gridCannotAot'),
-  labelFrequentlyUsedCount: document.getElementById('labelFrequentlyUsedCount'),
-  labelGeneralCount: document.getElementById('labelGeneralCount'),
   labelCannotAotCount: document.getElementById('labelCannotAotCount'),
   emptySearchNotice: document.getElementById('emptySearchNotice'),
   emptySearchQuery: document.getElementById('emptySearchQuery'),
@@ -467,15 +466,9 @@ function applySortOrder(sortMode = state.sortOrder) {
   state.sortOrder = sortMode;
   if (!state.apps || !Array.isArray(state.apps.frequentlyUsed)) return;
 
-  if (sortMode === 'default') {
-    state.apps.frequentlyUsed = sortApps(state.apps.frequentlyUsed, 'usage_desc');
-    state.apps.general = sortApps(state.apps.general, 'name_asc');
-    state.apps.cannotAot = sortApps(state.apps.cannotAot, 'name_asc');
-  } else {
-    state.apps.frequentlyUsed = sortApps(state.apps.frequentlyUsed, sortMode);
-    state.apps.general = sortApps(state.apps.general, sortMode);
-    state.apps.cannotAot = sortApps(state.apps.cannotAot, sortMode);
-  }
+  state.apps.frequentlyUsed = sortApps(state.apps.frequentlyUsed, sortMode);
+  state.apps.general = sortApps(state.apps.general, sortMode);
+  state.apps.cannotAot = sortApps(state.apps.cannotAot, sortMode === 'default' ? 'name_asc' : sortMode);
 }
 
 async function startAppScan() {
@@ -522,9 +515,8 @@ function updatePillCounts() {
   el.countGeneral.textContent = state.apps.general.length;
   el.countCannotAot.textContent = state.apps.cannotAot.length;
 
-  el.labelFrequentlyUsedCount.textContent = `${state.apps.frequentlyUsed.length} apps`;
-  el.labelGeneralCount.textContent = `${state.apps.general.length} apps`;
-  el.labelCannotAotCount.textContent = `${state.apps.cannotAot.length} apps`;
+  if (el.labelAppsCount) el.labelAppsCount.textContent = `${userCount + systemCount} apps`;
+  if (el.labelCannotAotCount) el.labelCannotAotCount.textContent = `${state.apps.cannotAot.length} apps`;
 
   if (el.batchScopeUserCount) el.batchScopeUserCount.textContent = `${userCount} 個`;
   if (el.batchScopeAllCount) el.batchScopeAllCount.textContent = `${userCount + systemCount} 個`;
@@ -553,33 +545,69 @@ function renderAppGrids() {
       const match = app.displayName.toLowerCase().includes(query) || app.packageName.toLowerCase().includes(query);
       if (!match) return false;
     }
-    if (state.currentFilter === 'user') {
-      return !app.isSystem && !app.isCannotAot;
-    }
-    if (state.currentFilter === 'system') {
-      return app.isSystem && !app.isCannotAot;
-    }
     return true;
   };
 
-  const filteredFrequent = state.apps.frequentlyUsed.filter(filterFn);
-  const filteredGeneral = state.apps.general.filter(filterFn);
-  const filteredCannotAot = state.apps.cannotAot.filter(filterFn);
+  // Determine which apps belong to the main optimizable grid based on state.currentFilter
+  let targetApps = [];
+  let title = 'Applications';
+  let subtitle = '(可最佳化應用程式)';
 
-  // Filter category visibility
-  const isTypeFilter = state.currentFilter === 'all' || state.currentFilter === 'user' || state.currentFilter === 'system';
-  const showFrequent = (isTypeFilter || state.currentFilter === 'frequently_used') && filteredFrequent.length > 0;
-  const showGeneral = (isTypeFilter || state.currentFilter === 'general') && filteredGeneral.length > 0;
-  const showCannotAot = (state.currentFilter === 'all' || state.currentFilter === 'cannot_aot') && filteredCannotAot.length > 0;
+  if (state.currentFilter === 'all') {
+    targetApps = [...state.apps.frequentlyUsed, ...state.apps.general];
+    title = 'Applications';
+    subtitle = '(可最佳化應用程式)';
+  } else if (state.currentFilter === 'frequently_used') {
+    targetApps = [...state.apps.frequentlyUsed];
+    title = 'Frequently Used Apps';
+    subtitle = '(常用應用程式)';
+  } else if (state.currentFilter === 'user') {
+    targetApps = [...state.apps.frequentlyUsed, ...state.apps.general].filter((a) => !a.isSystem && !a.isCannotAot);
+    title = 'User Apps';
+    subtitle = '(使用者安裝應用程式)';
+  } else if (state.currentFilter === 'system') {
+    targetApps = [...state.apps.frequentlyUsed, ...state.apps.general].filter((a) => a.isSystem && !a.isCannotAot);
+    title = 'System Apps';
+    subtitle = '(系統內建應用程式)';
+  } else if (state.currentFilter === 'general') {
+    targetApps = [...state.apps.general];
+    title = 'General Apps';
+    subtitle = '(其他已安裝應用程式)';
+  } else if (state.currentFilter === 'cannot_aot') {
+    targetApps = [];
+  }
 
-  el.sectionFrequentlyUsed.style.display = showFrequent ? 'block' : 'none';
-  el.sectionGeneral.style.display = showGeneral ? 'block' : 'none';
-  el.sectionCannotAot.style.display = showCannotAot ? 'block' : 'none';
+  // Sort target apps with current sortOrder
+  const sortedApps = sortApps(targetApps, state.sortOrder);
+  const filteredApps = sortedApps.filter(filterFn);
+
+  // Cannot AOT section
+  const showCannotAotSection = state.currentFilter === 'all' || state.currentFilter === 'cannot_aot';
+  const sortedCannotAot = sortApps(state.apps.cannotAot, state.sortOrder === 'default' ? 'name_asc' : state.sortOrder);
+  const filteredCannotAot = showCannotAotSection ? sortedCannotAot.filter(filterFn) : [];
+
+  const showApps = filteredApps.length > 0;
+  const showCannotAot = showCannotAotSection && filteredCannotAot.length > 0;
+
+  if (el.sectionApps) {
+    el.sectionApps.style.display = showApps ? 'block' : 'none';
+  }
+  if (el.labelAppsTitle) el.labelAppsTitle.textContent = title;
+  if (el.labelAppsSubtitle) el.labelAppsSubtitle.textContent = subtitle;
+  if (el.labelAppsCount) el.labelAppsCount.textContent = `${filteredApps.length} apps`;
+
+  if (el.sectionCannotAot) {
+    el.sectionCannotAot.style.display = showCannotAot ? 'block' : 'none';
+  }
+  if (el.labelCannotAotCount) el.labelCannotAotCount.textContent = `${filteredCannotAot.length} apps`;
 
   // Render cards
-  el.gridFrequentlyUsed.innerHTML = filteredFrequent.map((app) => createAppCardHtml(app)).join('');
-  el.gridGeneral.innerHTML = filteredGeneral.map((app) => createAppCardHtml(app)).join('');
-  el.gridCannotAot.innerHTML = filteredCannotAot.map((app) => createAppCardHtml(app)).join('');
+  if (el.gridApps) {
+    el.gridApps.innerHTML = filteredApps.map((app) => createAppCardHtml(app)).join('');
+  }
+  if (el.gridCannotAot) {
+    el.gridCannotAot.innerHTML = filteredCannotAot.map((app) => createAppCardHtml(app)).join('');
+  }
 
   // Attach optimize event listeners
   document.querySelectorAll('.btn-optimize-app').forEach((btn) => {

@@ -13,9 +13,9 @@ const rootDir = path.resolve(__dirname, '..');
 test('index.html uses 2 columns on lg (tablet landscape) to prevent squishing', () => {
   const html = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf-8');
 
-  // Verify all 3 app grids have lg:grid-cols-2
-  const gridMatches = html.match(/id="grid(FrequentlyUsed|General|CannotAot)"\s+class="([^"]+)"/g);
-  assert.ok(gridMatches && gridMatches.length === 3, 'Expected 3 app grid definitions in index.html');
+  // Verify all 2 app grids have lg:grid-cols-2
+  const gridMatches = html.match(/id="grid(Apps|CannotAot)"\s+class="([^"]+)"/g);
+  assert.ok(gridMatches && gridMatches.length === 2, 'Expected 2 app grid definitions in index.html');
 
   for (const match of gridMatches) {
     assert.ok(

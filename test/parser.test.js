@@ -797,3 +797,40 @@ Dexopt state:
   assert.strictEqual(parsed.hasCode, true);
 });
 
+test('classifyApps defaults to maxFrequentlyUsed = 50 and assigns rankingScore with category boost', () => {
+  const pkgList = [];
+  const usageMap = new Map();
+  const launcherSet = new Set();
+  const dexoptMap = new Map();
+
+  for (let i = 1; i <= 60; i++) {
+    const pkg = `com.test.app${i}`;
+    pkgList.push({ packageName: pkg, path: `/data/app/${pkg}/base.apk`, isSystem: false });
+    usageMap.set(pkg, { foregroundMs: (70 - i) * 60000 });
+    launcherSet.add(pkg);
+  }
+
+  const { frequentlyUsed, general } = classifyApps(pkgList, usageMap, launcherSet, dexoptMap);
+
+  assert.strictEqual(frequentlyUsed.length, 50, 'Default maxFrequentlyUsed must be 50');
+  assert.strictEqual(general.length, 10, 'Remaining 10 apps should be in general');
+  assert.ok(typeof frequentlyUsed[0].rankingScore === 'number', 'rankingScore must be defined');
+  assert.ok(frequentlyUsed[0].rankingScore > frequentlyUsed[49].rankingScore, 'frequentlyUsed must be sorted descending by score');
+});
+
+test('sortApps with default sorts by rankingScore / priorityScore descending', () => {
+  const apps = [
+    { packageName: 'app.low', displayName: 'Low', rankingScore: 1.0, priorityScore: 0.9, isSystem: false },
+    { packageName: 'app.high', displayName: 'High', rankingScore: 3.5, priorityScore: 3.15, isSystem: false },
+    { packageName: 'app.mid', displayName: 'Mid', rankingScore: 2.2, priorityScore: 1.85, isSystem: false },
+    { packageName: 'app.system', displayName: 'System', rankingScore: 2.2, priorityScore: 1.85, isSystem: true },
+  ];
+
+  const sorted = sortApps(apps, 'default');
+  assert.strictEqual(sorted[0].packageName, 'app.high');
+  assert.strictEqual(sorted[1].packageName, 'app.mid'); // User app before system app when score is tied
+  assert.strictEqual(sorted[2].packageName, 'app.system');
+  assert.strictEqual(sorted[3].packageName, 'app.low');
+});
+
+

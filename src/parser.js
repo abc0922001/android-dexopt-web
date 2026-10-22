@@ -631,7 +631,7 @@ export function parseSinglePackageDexopt(text, expectedPackage = null) {
  * @param {Map<string, { status: string, reason: string, hasCode: boolean, isOverlay: boolean }>} dexoptMap
  * @returns {{ frequentlyUsed: Array<object>, general: Array<object>, cannotAot: Array<object> }}
  */
-export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { maxFrequentlyUsed = 25, minForegroundMs = 0 } = {}) {
+export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { maxFrequentlyUsed = 50, minForegroundMs = 0 } = {}) {
   const cannotAot = [];
   const candidates = [];
 
@@ -737,7 +737,8 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     } else if (!app.isSystem) {
       score += 0.10; // 0.10 boost for user-installed apps
     }
-    return { app, score };
+    app.rankingScore = Number(score.toFixed(4));
+    return { app, score: app.rankingScore };
   });
 
   // Sort candidates by score descending:
@@ -812,10 +813,10 @@ export function classifyApps(packageList, usageData, launcherSet, dexoptMap, { m
     }
   }
 
-  // Frequently used sorted by multi-scale log-decay priorityScore descending (AOT compilation priority!), then foregroundMs, then name
+  // Frequently used sorted by multi-scale log-decay rankingScore/priorityScore descending (AOT compilation priority!), then foregroundMs, then name
   frequentlyUsed.sort((a, b) => {
-    const scoreA = typeof a.priorityScore === 'number' ? a.priorityScore : 0;
-    const scoreB = typeof b.priorityScore === 'number' ? b.priorityScore : 0;
+    const scoreA = typeof a.rankingScore === 'number' ? a.rankingScore : (typeof a.priorityScore === 'number' ? a.priorityScore : 0);
+    const scoreB = typeof b.rankingScore === 'number' ? b.rankingScore : (typeof b.priorityScore === 'number' ? b.priorityScore : 0);
     if (scoreB !== scoreA) return scoreB - scoreA;
     if ((b.foregroundMs || 0) !== (a.foregroundMs || 0)) {
       return (b.foregroundMs || 0) - (a.foregroundMs || 0);
@@ -1043,7 +1044,21 @@ export function sortApps(apps, sortMode = 'default') {
 
     case 'default':
     default:
-      return list;
+      return list.sort((a, b) => {
+        const scoreA = typeof a.rankingScore === 'number' ? a.rankingScore : (typeof a.priorityScore === 'number' ? a.priorityScore : 0);
+        const scoreB = typeof b.rankingScore === 'number' ? b.rankingScore : (typeof b.priorityScore === 'number' ? b.priorityScore : 0);
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        const prioA = typeof a.priorityScore === 'number' ? a.priorityScore : 0;
+        const prioB = typeof b.priorityScore === 'number' ? b.priorityScore : 0;
+        if (prioB !== prioA) return prioB - prioA;
+        if ((b.foregroundMs || 0) !== (a.foregroundMs || 0)) {
+          return (b.foregroundMs || 0) - (a.foregroundMs || 0);
+        }
+        if (a.isSystem !== b.isSystem) {
+          return a.isSystem ? 1 : -1;
+        }
+        return a.displayName.localeCompare(b.displayName);
+      });
   }
 }
 
