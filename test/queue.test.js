@@ -176,3 +176,55 @@ test('AotQueueManager triggers onItemStatusChange on cancel and failure', async 
   assert.strictEqual(manager.getItem('app.cancelling'), undefined);
 });
 
+test('AotQueueManager accurately records duration, transition, and triggers onQueueStart/Complete', async () => {
+  let queueStarted = false;
+  let queueCompleted = false;
+
+  const manager = new AotQueueManager({
+    onQueueStart: async () => {
+      queueStarted = true;
+    },
+    onQueueComplete: async () => {
+      queueCompleted = true;
+    },
+    onProcessItem: async (item) => {
+      await new Promise((r) => setTimeout(r, 60));
+      return { status: 'speed', reason: 'cmdline' };
+    },
+  });
+
+  manager.enqueue({ packageName: 'app.transition', status: 'verify', reason: 'install' }, 'speed');
+
+  await new Promise((r) => setTimeout(r, 120));
+
+  assert.strictEqual(queueStarted, true, 'onQueueStart hook must be called');
+  assert.strictEqual(queueCompleted, true, 'onQueueComplete hook must be called');
+
+  const item = manager.items[0];
+  assert.strictEqual(item.status, 'completed');
+  assert.ok(typeof item.durationMs === 'number' && item.durationMs >= 40, 'durationMs must be recorded');
+  assert.ok(item.duration.endsWith('s'), 'duration must be formatted with s');
+  assert.strictEqual(item.previousStatus, 'verify');
+  assert.strictEqual(item.newStatus, 'speed');
+  assert.strictEqual(item.transition, 'verify → speed');
+});
+
+test('AotQueueManager triggers onQueueCancel when all tasks are cancelled', async () => {
+  let cancelFired = false;
+  const manager = new AotQueueManager({
+    onQueueCancel: async () => {
+      cancelFired = true;
+    },
+    onProcessItem: async () => {
+      await new Promise((r) => setTimeout(r, 100));
+      return { status: 'speed' };
+    },
+  });
+
+  manager.enqueue({ packageName: 'app.pending1' });
+  manager.clearAll({ cancelRunning: true });
+
+  assert.strictEqual(cancelFired, true, 'onQueueCancel must fire when queue is cleared with cancelRunning');
+});
+
+

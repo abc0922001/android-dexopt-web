@@ -4,13 +4,17 @@
  * and provides real-time status tracking for running, waiting, and completed operations.
  */
 export class AotQueueManager {
-  constructor({ onProcessItem, onQueueChange, onItemStatusChange } = {}) {
+  constructor({ onProcessItem, onQueueChange, onItemStatusChange, onQueueStart, onQueueComplete, onQueueCancel } = {}) {
     this.queue = [];
     this.isProcessing = false;
     this.onProcessItem = onProcessItem || (async () => {});
     this.onQueueChange = onQueueChange || (() => {});
     this.onItemStatusChange = onItemStatusChange || (() => {});
+    this.onQueueStart = onQueueStart || (() => {});
+    this.onQueueComplete = onQueueComplete || (() => {});
+    this.onQueueCancel = onQueueCancel || (() => {});
     this._nextId = 1;
+    this._rootHookApplied = false;
   }
 
   /**
@@ -61,11 +65,17 @@ export class AotQueueManager {
 
   /**
    * Enqueue a new AOT task
+   * @param {object} app
+   * @param {string|object} [mode='speed'] Mode string or options object
+   * @param {object} [options={}] Additional compilation options (reason, checkProf, clearProfile, splitName, etc.)
    */
-  enqueue(app, mode = 'speed') {
+  enqueue(app, mode = 'speed', options = {}) {
     if (this.isQueued(app.packageName)) {
       return { success: false, reason: 'already_queued' };
     }
+
+    const modeStr = typeof mode === 'string' ? mode : (mode?.filter || mode?.mode || 'speed');
+    const mergedOptions = typeof mode === 'object' && mode !== null ? { ...mode, ...options } : { ...options, filter: modeStr };
 
     const item = {
       id: this._nextId++,
@@ -73,11 +83,20 @@ export class AotQueueManager {
       displayName: app.displayName || app.packageName,
       path: app.path || '',
       isSystem: !!app.isSystem,
-      mode,
+      mode: modeStr,
+      options: mergedOptions,
       status: 'waiting',
+      previousStatus: app.status || 'unknown',
+      previousReason: app.reason || 'unknown',
+      newStatus: null,
+      newReason: null,
+      transition: null,
       queuedAt: Date.now(),
       startedAt: null,
+      startTime: null,
       completedAt: null,
+      endTime: null,
+      durationMs: null,
       duration: null,
       error: null,
       result: null,
@@ -98,7 +117,9 @@ export class AotQueueManager {
     if (!item) return false;
     if (item.status === 'waiting') {
       item.status = 'cancelled';
-      item.completedAt = Date.now();
+      const now = Date.now();
+      item.completedAt = now;
+      item.endTime = now;
       this.notifyItemStatusChange(item);
       this.notifyChange();
       return true;
@@ -111,10 +132,12 @@ export class AotQueueManager {
    */
   cancelAllPending() {
     let cancelled = 0;
+    const now = Date.now();
     for (const item of this.queue) {
       if (item.status === 'waiting') {
         item.status = 'cancelled';
-        item.completedAt = Date.now();
+        item.completedAt = now;
+        item.endTime = now;
         this.notifyItemStatusChange(item);
         cancelled++;
       }
@@ -138,11 +161,25 @@ export class AotQueueManager {
    * @param {{ cancelRunning?: boolean }} [options]
    */
   clearAll({ cancelRunning = false } = {}) {
+    const now = Date.now();
     for (const item of this.queue) {
       if (item.status === 'waiting' || (cancelRunning && item.status === 'running')) {
         item.status = 'cancelled';
-        item.completedAt = Date.now();
+        item.completedAt = now;
+        item.endTime = now;
+        if (item.startedAt) {
+          item.durationMs = now - item.startedAt;
+          item.duration = `${(item.durationMs / 1000).toFixed(1)}s`;
+        }
         this.notifyItemStatusChange(item);
+      }
+    }
+    if (this._rootHookApplied && (cancelRunning || this.waitingCount === 0)) {
+      this._rootHookApplied = false;
+      try {
+        this.onQueueCancel?.();
+      } catch {
+        // ignore
       }
     }
     if (cancelRunning) {
@@ -179,12 +216,32 @@ export class AotQueueManager {
     const nextItem = this.queue.find((i) => i.status === 'waiting');
     if (!nextItem) {
       this.isProcessing = false;
+      if (this._rootHookApplied && this.activeCount === 0 && this.waitingCount === 0) {
+        this._rootHookApplied = false;
+        try {
+          this.onQueueComplete?.();
+        } catch {
+          // ignore
+        }
+      }
       return;
+    }
+
+    // Trigger onQueueStart once when queue starts executing from idle
+    if (!this._rootHookApplied) {
+      this._rootHookApplied = true;
+      try {
+        this.onQueueStart?.();
+      } catch {
+        // ignore
+      }
     }
 
     this.isProcessing = true;
     nextItem.status = 'running';
-    nextItem.startedAt = Date.now();
+    const start = Date.now();
+    nextItem.startedAt = start;
+    nextItem.startTime = start;
     this.notifyItemStatusChange(nextItem);
     this.notifyChange();
 
@@ -192,13 +249,24 @@ export class AotQueueManager {
       const result = await this.onProcessItem(nextItem);
       nextItem.status = 'completed';
       nextItem.result = result;
-      nextItem.completedAt = Date.now();
-      nextItem.duration = `${((nextItem.completedAt - nextItem.startedAt) / 1000).toFixed(1)}s`;
+      const end = Date.now();
+      nextItem.completedAt = end;
+      nextItem.endTime = end;
+      nextItem.durationMs = end - nextItem.startedAt;
+      nextItem.duration = `${(nextItem.durationMs / 1000).toFixed(1)}s`;
+      if (result && result.status) {
+        nextItem.newStatus = result.status;
+        nextItem.newReason = result.reason || 'cmdline';
+        nextItem.transition = `${nextItem.previousStatus} → ${nextItem.newStatus}`;
+      }
     } catch (err) {
       nextItem.status = 'failed';
       nextItem.error = err.message || String(err);
-      nextItem.completedAt = Date.now();
-      nextItem.duration = `${((nextItem.completedAt - nextItem.startedAt) / 1000).toFixed(1)}s`;
+      const end = Date.now();
+      nextItem.completedAt = end;
+      nextItem.endTime = end;
+      nextItem.durationMs = end - nextItem.startedAt;
+      nextItem.duration = `${(nextItem.durationMs / 1000).toFixed(1)}s`;
     } finally {
       this.notifyItemStatusChange(nextItem);
       this.isProcessing = false;

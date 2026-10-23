@@ -453,11 +453,15 @@ export function parseDumpsysPackageStream(text) {
     if (pathMatch) {
       const p = pathMatch[1].trim();
       currentInfo.pathCount++;
-      const isSplit = p.includes('/split_') || p.includes('.split_');
+      const isSplit = p.includes('/split_') || p.includes('.split_') || p.includes('split_');
+      const rawFileName = p.split('/').pop() || p;
+      const splitCleanName = rawFileName.replace(/^split_/, '').replace(/\.apk$/, '');
       currentSubItem = {
         type: isSplit ? 'split' : 'primary',
         path: p,
-        name: isSplit ? (p.split('/').pop() || p) : 'base.apk',
+        fileName: rawFileName,
+        name: isSplit ? rawFileName : 'base.apk',
+        splitName: isSplit ? splitCleanName : null,
         status: 'unknown',
         reason: 'unknown',
       };
@@ -617,6 +621,117 @@ export function parseSinglePackageDexopt(text, expectedPackage = null) {
   }
 
   return result;
+}
+
+/**
+ * Parse output of `getprop` or `getprop | grep -E ...`
+ * Extracts system dalvik.vm and pm.dexopt properties for compiler hardware scheduling diagnostics.
+ *
+ * @param {string} text Raw output from getprop command
+ * @returns {{
+ *   defaultThreads: string|null,
+ *   defaultCpuSet: string|null,
+ *   bgThreads: string|null,
+ *   bgCpuSet: string|null,
+ *   bootThreads: string|null,
+ *   bootCpuSet: string|null,
+ *   imageThreads: string|null,
+ *   extraFlags: string|null,
+ *   dex2oatFilter: string|null,
+ *   pmFilters: Record<string, string>,
+ *   rawProps: Record<string, string>,
+ *   summary: string
+ * }}
+ */
+export function parseSystemDexoptProps(text) {
+  const result = {
+    defaultThreads: null,
+    threads: null,
+    defaultCpuSet: null,
+    cpuSet: null,
+    bgThreads: null,
+    bgDexoptThreads: null,
+    bgCpuSet: null,
+    bgDexoptCpuSet: null,
+    bootThreads: null,
+    bootImageThreads: null,
+    bootCpuSet: null,
+    imageThreads: null,
+    extraFlags: null,
+    dex2oatFilter: null,
+    pmFilters: {},
+    pmDexopt: {},
+    rawProps: {},
+    summary: '',
+  };
+
+  if (!text || typeof text !== 'string') return result;
+
+  const lines = text.split(/\r?\n/);
+  // Match both `[prop.name]: [prop.value]` and `prop.name: prop.value`
+  const propRegex = /^\s*\[?([a-zA-Z0-9_\.\-]+)\]?\s*[:=]\s*\[?(.*?)\]?\s*$/;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const match = trimmed.match(propRegex);
+    if (!match) continue;
+
+    const key = match[1].trim();
+    const val = match[2].trim();
+    result.rawProps[key] = val;
+
+    if (key === 'dalvik.vm.dex2oat-threads') {
+      result.defaultThreads = result.threads = val;
+    } else if (key === 'dalvik.vm.dex2oat-cpu-set') {
+      result.defaultCpuSet = result.cpuSet = val;
+    } else if (key === 'dalvik.vm.bg-dexopt.threads' || key === 'dalvik.vm.background-dex2oat-threads') {
+      result.bgThreads = result.bgDexoptThreads = val;
+    } else if (key === 'dalvik.vm.bg-dexopt.cpu-set' || key === 'dalvik.vm.background-dex2oat-cpu-set') {
+      result.bgCpuSet = result.bgDexoptCpuSet = val;
+    } else if (key === 'dalvik.vm.boot-dex2oat-threads') {
+      result.bootThreads = result.bootImageThreads = val;
+    } else if (key === 'dalvik.vm.boot-dex2oat-cpu-set') {
+      result.bootCpuSet = val;
+    } else if (key === 'dalvik.vm.image-dex2oat-threads') {
+      result.imageThreads = val;
+    } else if (key === 'dalvik.vm.dex2oat-flags') {
+      result.extraFlags = val;
+    } else if (key === 'dalvik.vm.dex2oat-filter') {
+      result.dex2oatFilter = val;
+    } else if (key.startsWith('pm.dexopt.')) {
+      const subKey = key.slice('pm.dexopt.'.length);
+      result.pmFilters[subKey] = val;
+      result.pmDexopt[subKey] = val;
+    }
+  }
+
+  result.summary = formatCpuConfigSummary(result);
+  return result;
+}
+
+/**
+ * Format CPU scheduling configuration summary into human-readable Traditional Chinese
+ * @param {object} props
+ * @param {'default'|'cmdline'|'bg-dexopt'} [mode='default']
+ * @returns {string}
+ */
+export function formatCpuConfigSummary(props, mode = 'default') {
+  if (!props) return '裝置調度設定：系統預設排程';
+
+  const defThreads = props.threads || props.defaultThreads || '預設';
+  const defCpus = (props.cpuSet || props.defaultCpuSet) ? ` (核心 ${props.cpuSet || props.defaultCpuSet})` : '';
+  const bgThreads = props.bgDexoptThreads || props.bgThreads || '預設';
+  const bgCpus = (props.bgDexoptCpuSet || props.bgCpuSet) ? ` (核心 ${props.bgDexoptCpuSet || props.bgCpuSet})` : '';
+
+  if (mode === 'cmdline') {
+    return `極速全核模式：使用 ${defThreads} 執行緒${defCpus}，全速進行 AOT 編譯`;
+  } else if (mode === 'bg-dexopt') {
+    return `溫和降溫模式：限制使用 ${bgThreads} 執行緒${bgCpus}，降低發熱與前景干擾`;
+  }
+
+  return `極速模式：${defThreads} 執行緒${defCpus} ｜ 省電模式：${bgThreads} 執行緒${bgCpus}`;
 }
 
 /**

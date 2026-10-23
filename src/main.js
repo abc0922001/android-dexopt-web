@@ -1,15 +1,29 @@
 import { AdbController } from './adb-controller.js';
 import { getAppIcon, ICONS, createGoogleSearchLink, escapeHtml } from './icons.js';
-import { sortApps } from './parser.js';
+import { sortApps, formatCpuConfigSummary, parseSystemDexoptProps } from './parser.js';
 import { AotQueueManager } from './queue-manager.js';
 import { APP_VERSION, getFormattedVersion } from './version.js';
 
 // Application State
 const state = {
-  dexoptMode: 'speed', // 'speed' | 'speed-profile'
+  dexoptMode: 'speed', // 'speed' | 'speed-profile' | 'everything'
   currentFilter: 'all',        // 'all' | 'frequently_used' | 'general' | 'cannot_aot'
   searchQuery: '',
   sortOrder: 'default',        // 'default' | 'status_unknown_first' | 'status_speed_first' | 'name_asc' | 'usage_desc'
+  compilerReason: 'default',   // 'default' | 'cmdline' | 'bg-dexopt'
+  checkProfFalse: false,       // boolean (--check-prof false)
+  clearProfile: false,         // boolean (-c)
+  systemProps: null,           // parsed dexopt properties from getprop
+  rootExpert: {
+    enabled: false,
+    inlining: false,
+    stripDebug: false,
+    armFeatures: false,
+    threads: 8,
+    cpuSet: '',
+    extraFlags: '',
+  },
+  pendingSplitApp: null,
   theme: localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   connectedDevice: null,
   apps: {
@@ -130,7 +144,58 @@ const el = {
 
   modeSpeed: document.getElementById('modeSpeed'),
   modeSpeedProfile: document.getElementById('modeSpeedProfile'),
+  modeEverything: document.getElementById('modeEverything'),
   modeHintText: document.getElementById('modeHintText'),
+
+  btnToggleAdvancedOptions: document.getElementById('btnToggleAdvancedOptions'),
+  advancedOptionsChevron: document.getElementById('advancedOptionsChevron'),
+  advancedOptionsBadge: document.getElementById('advancedOptionsBadge'),
+  advancedOptionsPanel: document.getElementById('advancedOptionsPanel'),
+  btnOpenDevicePropsQuick: document.getElementById('btnOpenDevicePropsQuick'),
+  btnOpenRootQuick: document.getElementById('btnOpenRootQuick'),
+  chkCheckProfFalse: document.getElementById('chkCheckProfFalse'),
+  chkClearProfile: document.getElementById('chkClearProfile'),
+  advancedCpuHintText: document.getElementById('advancedCpuHintText'),
+
+  btnOpenDevicePropsModal: document.getElementById('btnOpenDevicePropsModal'),
+  devicePropsModal: document.getElementById('devicePropsModal'),
+  btnCloseDevicePropsModal: document.getElementById('btnCloseDevicePropsModal'),
+  btnCloseDevicePropsModalHeader: document.getElementById('btnCloseDevicePropsModalHeader'),
+  btnRefreshDeviceProps: document.getElementById('btnRefreshDeviceProps'),
+  dpDefaultThreads: document.getElementById('dpDefaultThreads'),
+  dpDefaultCpuSet: document.getElementById('dpDefaultCpuSet'),
+  dpBgThreads: document.getElementById('dpBgThreads'),
+  dpBgCpuSet: document.getElementById('dpBgCpuSet'),
+  dpBootThreads: document.getElementById('dpBootThreads'),
+  dpImageThreads: document.getElementById('dpImageThreads'),
+  dpDex2oatFilter: document.getElementById('dpDex2oatFilter'),
+  dpExtraFlags: document.getElementById('dpExtraFlags'),
+  dpPmFiltersList: document.getElementById('dpPmFiltersList'),
+
+  splitModal: document.getElementById('splitModal'),
+  splitModalPkg: document.getElementById('splitModalPkg'),
+  splitCountBadge: document.getElementById('splitCountBadge'),
+  splitListContainer: document.getElementById('splitListContainer'),
+  btnCloseSplitModal: document.getElementById('btnCloseSplitModal'),
+  btnCloseSplitModalHeader: document.getElementById('btnCloseSplitModalHeader'),
+  btnClearAndReprofile: document.getElementById('btnClearAndReprofile'),
+  btnCompileSelectedSplit: document.getElementById('btnCompileSelectedSplit'),
+
+  btnOpenRootModal: document.getElementById('btnOpenRootModal'),
+  rootExpertModal: document.getElementById('rootExpertModal'),
+  btnCloseRootModal: document.getElementById('btnCloseRootModal'),
+  btnCloseRootModalHeader: document.getElementById('btnCloseRootModalHeader'),
+  btnProbeRoot: document.getElementById('btnProbeRoot'),
+  rootStatusIndicator: document.getElementById('rootStatusIndicator'),
+  rootStatusText: document.getElementById('rootStatusText'),
+  chkRootInlining: document.getElementById('chkRootInlining'),
+  chkRootStripDebug: document.getElementById('chkRootStripDebug'),
+  chkRootArmFeatures: document.getElementById('chkRootArmFeatures'),
+  sliderRootThreads: document.getElementById('sliderRootThreads'),
+  labelRootThreadsVal: document.getElementById('labelRootThreadsVal'),
+  inputRootCpuSet: document.getElementById('inputRootCpuSet'),
+  btnRestoreRootNow: document.getElementById('btnRestoreRootNow'),
+  btnSaveRootConfig: document.getElementById('btnSaveRootConfig'),
 
   searchInput: document.getElementById('searchInput'),
   btnClearSearch: document.getElementById('btnClearSearch'),
@@ -196,10 +261,13 @@ const queueManager = new AotQueueManager({
     appendTerminalLog(`\n[AOT 佇列] 正在編譯 [${item.displayName}] (${item.packageName})，模式: ${item.mode}...\n`);
     try {
       const app = findApp(item.packageName);
-      const updated = await adbController.compileApp(item.packageName, item.mode, {
+      const compileOptions = {
+        filter: item.mode,
         onOutput: (chunk) => appendTerminalLog(chunk),
         appInfo: app,
-      });
+        ...(item.options || {}),
+      };
+      const updated = await adbController.compilePackage(item.packageName, compileOptions);
 
       if (app) {
         app.status = updated.status;
@@ -230,6 +298,40 @@ const queueManager = new AotQueueManager({
       appendTerminalLog(`❌ [AOT 佇列] [${item.displayName}] 編譯失敗: ${err.message}\n`);
       showToast('編譯失敗', `[${item.displayName}] ${err.message}`, 'error');
       throw err;
+    }
+  },
+  onQueueStart: async () => {
+    if (state.rootExpert.enabled) {
+      appendTerminalLog('\n[Root 專家] 佇列啟動，正在動態注入自訂 dex2oat 核心調校參數...\n');
+      try {
+        await adbController.applyCustomDex2oatProps({
+          threads: state.rootExpert.threads,
+          cpuSet: state.rootExpert.cpuSet,
+          extraFlags: state.rootExpert.extraFlags,
+        });
+      } catch (err) {
+        appendTerminalLog(`⚠️ [Root 專家] 參數注入失敗: ${err.message}\n`);
+      }
+    }
+  },
+  onQueueComplete: async () => {
+    if (state.rootExpert.enabled) {
+      appendTerminalLog('\n[Root 專家] 佇列全數完成，正在還原系統原始屬性...\n');
+      try {
+        await adbController.restoreDex2oatProps();
+      } catch (err) {
+        appendTerminalLog(`⚠️ [Root 專家] 還原失敗: ${err.message}\n`);
+      }
+    }
+  },
+  onQueueCancel: async () => {
+    if (state.rootExpert.enabled) {
+      appendTerminalLog('\n[Root 專家] 佇列中斷/取消，正在還原系統原始屬性...\n');
+      try {
+        await adbController.restoreDex2oatProps();
+      } catch (err) {
+        appendTerminalLog(`⚠️ [Root 專家] 還原失敗: ${err.message}\n`);
+      }
     }
   },
   onItemStatusChange: (item) => {
@@ -336,26 +438,61 @@ el.toastClose.addEventListener('click', () => {
 function setDexoptMode(mode) {
   state.dexoptMode = mode;
   
+  const activeClass = 'px-3.5 py-1 text-xs font-semibold rounded-lg bg-cyan-400 text-slate-950 shadow-sm transition-all cursor-pointer';
+  const activeAmberClass = 'px-3.5 py-1 text-xs font-semibold rounded-lg bg-amber-400 text-slate-950 shadow-sm transition-all cursor-pointer';
+  const inactiveClass = 'px-3.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer';
+
   if (mode === 'speed') {
-    el.modeSpeed.className = 'px-3.5 py-1 text-xs font-semibold rounded-lg bg-cyan-400 text-slate-950 shadow-sm transition-all cursor-pointer';
-    el.modeSpeed.setAttribute('aria-selected', 'true');
-    el.modeSpeedProfile.className = 'px-3.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer';
-    el.modeSpeedProfile.setAttribute('aria-selected', 'false');
-    el.modeHintText.textContent = 'Hint: speed 強制完整 AOT 編譯所有位元碼，不依賴使用紀錄，啟動最快。';
-  } else {
-    el.modeSpeedProfile.className = 'px-3.5 py-1 text-xs font-semibold rounded-lg bg-cyan-400 text-slate-950 shadow-sm transition-all cursor-pointer';
-    el.modeSpeedProfile.setAttribute('aria-selected', 'true');
-    el.modeSpeed.className = 'px-3.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer';
-    el.modeSpeed.setAttribute('aria-selected', 'false');
-    el.modeHintText.textContent = 'Hint: speed-profile 僅針對熱點設定檔編譯；若 App 尚無 Profile 將退回 verify。';
+    if (el.modeSpeed) {
+      el.modeSpeed.className = activeClass;
+      el.modeSpeed.setAttribute('aria-selected', 'true');
+    }
+    if (el.modeSpeedProfile) {
+      el.modeSpeedProfile.className = inactiveClass;
+      el.modeSpeedProfile.setAttribute('aria-selected', 'false');
+    }
+    if (el.modeEverything) {
+      el.modeEverything.className = inactiveClass;
+      el.modeEverything.setAttribute('aria-selected', 'false');
+    }
+    if (el.modeHintText) el.modeHintText.textContent = 'Hint: speed 強制完整 AOT 編譯所有位元碼，不依賴使用紀錄，啟動最快。';
+  } else if (mode === 'speed-profile') {
+    if (el.modeSpeedProfile) {
+      el.modeSpeedProfile.className = activeClass;
+      el.modeSpeedProfile.setAttribute('aria-selected', 'true');
+    }
+    if (el.modeSpeed) {
+      el.modeSpeed.className = inactiveClass;
+      el.modeSpeed.setAttribute('aria-selected', 'false');
+    }
+    if (el.modeEverything) {
+      el.modeEverything.className = inactiveClass;
+      el.modeEverything.setAttribute('aria-selected', 'false');
+    }
+    if (el.modeHintText) el.modeHintText.textContent = 'Hint: speed-profile 僅針對熱點設定檔編譯；若 App 尚無 Profile 將退回 verify。';
+  } else if (mode === 'everything') {
+    if (el.modeEverything) {
+      el.modeEverything.className = activeAmberClass;
+      el.modeEverything.setAttribute('aria-selected', 'true');
+    }
+    if (el.modeSpeed) {
+      el.modeSpeed.className = inactiveClass;
+      el.modeSpeed.setAttribute('aria-selected', 'false');
+    }
+    if (el.modeSpeedProfile) {
+      el.modeSpeedProfile.className = inactiveClass;
+      el.modeSpeedProfile.setAttribute('aria-selected', 'false');
+    }
+    if (el.modeHintText) el.modeHintText.textContent = 'Hint: everything 強制全量編譯所有類別與方法（含靜態初始化與超大方法），空間佔用最大、編譯時間最長，追求零 JIT。';
   }
 
   // Update existing app optimize button labels
   renderAppGrids();
 }
 
-el.modeSpeed.addEventListener('click', () => setDexoptMode('speed'));
-el.modeSpeedProfile.addEventListener('click', () => setDexoptMode('speed-profile'));
+el.modeSpeed?.addEventListener('click', () => setDexoptMode('speed'));
+el.modeSpeedProfile?.addEventListener('click', () => setDexoptMode('speed-profile'));
+el.modeEverything?.addEventListener('click', () => setDexoptMode('everything'));
 
 /* ---------------- Connection Handling ---------------- */
 
@@ -493,6 +630,14 @@ async function startAppScan() {
     applySortOrder(state.sortOrder);
     updatePillCounts();
     renderAppGrids();
+
+    // Fetch system props in background for hardware scheduler diagnostics
+    adbController.getDexoptSystemProps()
+      .then((props) => {
+        state.systemProps = props;
+        updateAdvancedCpuHint();
+      })
+      .catch(() => {});
 
     el.scanningState.classList.add('hidden');
     el.appListContainer.classList.remove('hidden');
@@ -637,6 +782,15 @@ function renderAppGrids() {
     });
   });
 
+  // Attach split modal event listeners
+  document.querySelectorAll('.btn-open-split-modal').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pkg = btn.dataset.package;
+      openSplitModal(pkg);
+    });
+  });
+
   const totalVisible = (showApps ? filteredApps.length : 0) +
                        (showCannotAot ? filteredCannotAot.length : 0);
 
@@ -693,11 +847,16 @@ function createAppCardHtml(app) {
     const splitColor = uncompiledSplits.length > 0
       ? 'border-amber-500/40 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300'
       : 'border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400';
-    const splitTooltip = `包含 ${app.splits.length} 個 Split APK 模組${uncompiledSplits.length > 0 ? ` (${uncompiledSplits.length} 個狀態為 ${uncompiledSplits[0].status})` : ' (已最佳化)'}`;
+    const splitTooltip = `包含 ${app.splits.length} 個 Split APK 模組${uncompiledSplits.length > 0 ? ` (${uncompiledSplits.length} 個狀態為 ${uncompiledSplits[0].status})` : ' (已最佳化)'}，點擊管理 Split 模組與 Profile`;
     splitBadge = `
-      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border ${splitColor}" title="${splitTooltip}">
+      <button
+        type="button"
+        data-package="${app.packageName}"
+        class="btn-open-split-modal inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border ${splitColor} hover:ring-1 hover:ring-purple-400 cursor-pointer transition-all active:scale-95"
+        title="${splitTooltip}"
+      >
         [split: ${app.splits.length}]
-      </span>
+      </button>
     `;
   }
 
@@ -941,6 +1100,13 @@ function updateAppCardInDom(app) {
     e.stopPropagation();
     await handleCheckSingleAppProfile(app.packageName, checkProfileBtn);
   });
+
+  // Bind split modal action
+  const splitBtn = newCard.querySelector('.btn-open-split-modal');
+  splitBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openSplitModal(app.packageName);
+  });
 }
 
 /* ---------------- Single App Optimization via Queue ---------------- */
@@ -955,7 +1121,18 @@ async function handleOptimizeApp(packageName, buttonEl) {
   if (!app) return;
 
   const targetMode = buttonEl?.dataset?.mode || app.overrideMode || state.dexoptMode;
-  const res = queueManager.enqueue(app, targetMode);
+  const options = {};
+  if (state.compilerReason && state.compilerReason !== 'default') {
+    options.compilerReason = state.compilerReason;
+  }
+  if (state.checkProfFalse) {
+    options.checkProfFalse = true;
+  }
+  if (state.clearProfile) {
+    options.clearProfile = true;
+  }
+
+  const res = queueManager.enqueue(app, targetMode, options);
 
   if (!res.success && res.reason === 'already_queued') {
     showToast('已在佇列中', `[${app.displayName}] 已經在 AOT 執行佇列中等待或執行。`, 'info');
@@ -1177,10 +1354,20 @@ async function handleStartBatch() {
       }
 
       try {
-        const updated = await adbController.compileApp(app.packageName, targetMode, {
+        const compileOpts = {
           onOutput: (chunk) => appendTerminalLog(chunk),
           skipQueryStatus: true,
-        });
+        };
+        if (state.compilerReason && state.compilerReason !== 'default') {
+          compileOpts.compilerReason = state.compilerReason;
+        }
+        if (state.checkProfFalse) {
+          compileOpts.checkProfFalse = true;
+        }
+        if (state.clearProfile) {
+          compileOpts.clearProfile = true;
+        }
+        const updated = await adbController.compileApp(app.packageName, targetMode, compileOpts);
         app.status = updated.status;
         app.reason = updated.reason;
         successCount++;
@@ -1974,6 +2161,9 @@ function updateQueueUi(items = queueManager.items) {
               <td class="py-2.5 px-3 whitespace-nowrap">
                 <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-slate-700 font-mono text-slate-700 dark:text-slate-300">${item.mode}</span>
               </td>
+              <td class="py-2.5 px-3 whitespace-nowrap font-mono text-[11px]">
+                ${item.transition ? `<span class="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">${escapeHtml(item.transition)}</span>` : '<span class="text-slate-400">-</span>'}
+              </td>
               <td class="py-2.5 px-3 whitespace-nowrap text-slate-500 dark:text-slate-400 font-mono text-[11px]">
                 ${item.duration || (item.status === 'running' ? '<span class="text-cyan-500">計算中...</span>' : '-')}
               </td>
@@ -2186,10 +2376,334 @@ function renderAppVersion() {
   });
 }
 
+/* ---------------- Advanced Compiler Options Panel ---------------- */
+
+function updateAdvancedBadge() {
+  let count = 0;
+  if (state.compilerReason !== 'default') count++;
+  if (state.checkProfFalse) count++;
+  if (state.clearProfile) count++;
+  if (state.rootExpert.enabled) count++;
+
+  if (el.advancedOptionsBadge) {
+    if (count > 0) {
+      el.advancedOptionsBadge.textContent = `${count} 項已客製`;
+      el.advancedOptionsBadge.classList.remove('hidden');
+    } else {
+      el.advancedOptionsBadge.classList.add('hidden');
+    }
+  }
+}
+
+function updateAdvancedCpuHint() {
+  if (!el.advancedCpuHintText) return;
+  const hint = formatCpuConfigSummary(state.systemProps, state.compilerReason);
+  el.advancedCpuHintText.textContent = hint;
+}
+
+el.btnToggleAdvancedOptions?.addEventListener('click', () => {
+  const isHidden = el.advancedOptionsPanel.classList.toggle('hidden');
+  el.advancedOptionsChevron?.classList.toggle('rotate-180', !isHidden);
+  el.btnToggleAdvancedOptions.setAttribute('aria-expanded', String(!isHidden));
+});
+
+document.querySelectorAll('.btn-reason-select').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.compilerReason = btn.dataset.reason || 'default';
+    document.querySelectorAll('.btn-reason-select').forEach((b) => {
+      if (b.dataset.reason === state.compilerReason) {
+        b.className = 'btn-reason-select active px-2.5 py-1.5 rounded-lg border border-cyan-500 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200 text-center font-medium transition-all cursor-pointer';
+      } else {
+        b.className = 'btn-reason-select px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-center font-medium transition-all cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300';
+      }
+    });
+    updateAdvancedBadge();
+    updateAdvancedCpuHint();
+  });
+});
+
+el.chkCheckProfFalse?.addEventListener('change', (e) => {
+  state.checkProfFalse = Boolean(e.target.checked);
+  updateAdvancedBadge();
+});
+
+el.chkClearProfile?.addEventListener('change', (e) => {
+  state.clearProfile = Boolean(e.target.checked);
+  updateAdvancedBadge();
+});
+
+/* ---------------- Device Props Modal ---------------- */
+
+async function openDevicePropsModal() {
+  if (!state.connectedDevice) {
+    showToast('尚未連線', '請先連線至 Android 裝置或開啟示範模式。', 'warning');
+    return;
+  }
+  el.devicePropsModal?.classList.remove('hidden');
+  await loadDeviceProps();
+}
+
+function closeDevicePropsModal() {
+  el.devicePropsModal?.classList.add('hidden');
+}
+
+async function loadDeviceProps() {
+  try {
+    const props = await adbController.getDexoptSystemProps();
+    state.systemProps = props;
+
+    if (el.dpDefaultThreads) el.dpDefaultThreads.textContent = props.threads ? `${props.threads} (自訂)` : '8 (系統預設)';
+    if (el.dpDefaultCpuSet) el.dpDefaultCpuSet.textContent = props.cpuSet || '全部核心 (未受限)';
+    if (el.dpBgThreads) el.dpBgThreads.textContent = props.bgDexoptThreads ? `${props.bgDexoptThreads} (背景節能)` : '4 (背景預設)';
+    if (el.dpBgCpuSet) el.dpBgCpuSet.textContent = props.bgDexoptCpuSet || '小核心 (節能遮罩)';
+    if (el.dpBootThreads) el.dpBootThreads.textContent = props.bootImageThreads || '-';
+    if (el.dpImageThreads) el.dpImageThreads.textContent = props.imageThreads || '-';
+    if (el.dpDex2oatFilter) el.dpDex2oatFilter.textContent = props.dex2oatFilter || 'speed-profile';
+    if (el.dpExtraFlags) el.dpExtraFlags.textContent = props.extraFlags || '無自訂 flags';
+
+    if (el.dpPmFiltersList) {
+      const entries = Object.entries(props.pmDexopt || {});
+      if (entries.length === 0) {
+        el.dpPmFiltersList.innerHTML = '<div class="text-slate-400 p-2 text-center text-xs">無自訂 pm.dexopt 設定</div>';
+      } else {
+        el.dpPmFiltersList.innerHTML = entries
+          .map(([k, v]) => `
+            <div class="flex items-center justify-between py-1 border-b border-slate-200/50 dark:border-slate-800/50 last:border-0">
+              <span class="font-mono text-slate-500">${escapeHtml(k)}</span>
+              <span class="font-mono font-semibold text-cyan-600 dark:text-cyan-400">${escapeHtml(v)}</span>
+            </div>
+          `)
+          .join('');
+      }
+    }
+
+    updateAdvancedCpuHint();
+  } catch (err) {
+    showToast('讀取硬體參數失敗', err.message, 'error');
+  }
+}
+
+el.btnOpenDevicePropsModal?.addEventListener('click', openDevicePropsModal);
+el.btnOpenDevicePropsQuick?.addEventListener('click', openDevicePropsModal);
+el.btnCloseDevicePropsModal?.addEventListener('click', closeDevicePropsModal);
+el.btnCloseDevicePropsModalHeader?.addEventListener('click', closeDevicePropsModal);
+el.btnRefreshDeviceProps?.addEventListener('click', async () => {
+  await loadDeviceProps();
+  showToast('硬體參數已更新', '已重新讀取裝置最新 dex2oat 屬性。', 'info');
+});
+
+/* ---------------- Split APK & Profile Workflow Modal ---------------- */
+
+function openSplitModal(packageName) {
+  const app = findApp(packageName);
+  if (!app) return;
+  state.pendingSplitApp = app;
+
+  if (el.splitModalPkg) {
+    el.splitModalPkg.textContent = `${app.displayName} (${app.packageName})`;
+  }
+  const splits = app.splits || [];
+  if (el.splitCountBadge) {
+    el.splitCountBadge.textContent = `${splits.length} 個模組`;
+  }
+
+  if (el.splitListContainer) {
+    if (splits.length === 0) {
+      el.splitListContainer.innerHTML = `
+        <div class="py-4 text-center text-slate-400 text-xs">
+          此應用無獨立 Split APK 模組 (為單一 Base APK)。<br>
+          您仍可使用上方按鈕進行 Profile 洗白與重建工作流。
+        </div>
+      `;
+    } else {
+      el.splitListContainer.innerHTML = splits
+        .map((s, idx) => {
+          const splitId = s.splitName || s.name;
+          const statusText = s.status || 'unknown';
+          const isCompiled = statusText === 'speed' || statusText === 'speed-profile';
+          return `
+            <label class="flex items-center justify-between p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 cursor-pointer transition-colors">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <input type="radio" name="splitSelection" value="${escapeHtml(splitId)}" ${idx === 0 ? 'checked' : ''} class="text-purple-600 focus:ring-purple-500">
+                <div class="min-w-0">
+                  <span class="font-mono font-medium text-slate-800 dark:text-slate-200 block truncate">${escapeHtml(splitId)}</span>
+                  <span class="text-[10px] text-slate-400 font-mono block truncate">${escapeHtml(s.name || s.fileName || '')}</span>
+                </div>
+              </div>
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${isCompiled ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'}">
+                ${statusText}
+              </span>
+            </label>
+          `;
+        })
+        .join('');
+    }
+  }
+
+  el.splitModal?.classList.remove('hidden');
+}
+
+function closeSplitModal() {
+  el.splitModal?.classList.add('hidden');
+  state.pendingSplitApp = null;
+}
+
+el.btnCloseSplitModal?.addEventListener('click', closeSplitModal);
+el.btnCloseSplitModalHeader?.addEventListener('click', closeSplitModal);
+
+el.btnClearAndReprofile?.addEventListener('click', () => {
+  const app = state.pendingSplitApp;
+  if (!app) return;
+  closeSplitModal();
+
+  appendTerminalLog(`\n[Profile 洗白] 正在對 ${app.displayName} (${app.packageName}) 下達 -c -m verify...\n`);
+  showToast('Profile 洗白中', `正在重置 [${app.displayName}] 的 Profile，並編譯為 verify...`, 'info');
+
+  const options = {
+    clearProfile: true,
+  };
+  const res = queueManager.enqueue(app, 'verify', options);
+  if (!res.success && res.reason === 'already_queued') {
+    showToast('已在佇列中', `[${app.displayName}] 已在佇列中。`, 'warning');
+  }
+});
+
+el.btnCompileSelectedSplit?.addEventListener('click', () => {
+  const app = state.pendingSplitApp;
+  if (!app) return;
+  const selectedRadio = document.querySelector('input[name="splitSelection"]:checked');
+  if (!selectedRadio) {
+    showToast('請選擇模組', '請先選擇要獨立編譯的 Split 模組。', 'warning');
+    return;
+  }
+  const splitName = selectedRadio.value;
+  closeSplitModal();
+
+  const options = {
+    split: splitName,
+  };
+  if (state.compilerReason !== 'default') options.compilerReason = state.compilerReason;
+  if (state.checkProfFalse) options.checkProfFalse = true;
+
+  const targetMode = state.dexoptMode;
+  appendTerminalLog(`\n[Split 編譯] 將 Split 模組 [${splitName}] 排入編譯佇列 (App: ${app.displayName}, 模式: ${targetMode})...\n`);
+  const res = queueManager.enqueue(app, targetMode, options);
+  if (!res.success && res.reason === 'already_queued') {
+    showToast('已在佇列中', `[${app.displayName}] 已在佇列中。`, 'warning');
+  } else {
+    showToast('已排入佇列', `已將 Split 模組 [${splitName}] 排入 AOT 佇列。`, 'info');
+  }
+});
+
+/* ---------------- Root Expert Mode Tuning Modal ---------------- */
+
+async function openRootModal() {
+  if (!state.connectedDevice) {
+    showToast('尚未連線', '請先連線至 Android 裝置或開啟示範模式。', 'warning');
+    return;
+  }
+  el.rootExpertModal?.classList.remove('hidden');
+  await probeRootStatus();
+}
+
+function closeRootModal() {
+  el.rootExpertModal?.classList.add('hidden');
+}
+
+async function probeRootStatus() {
+  if (el.rootStatusText) el.rootStatusText.textContent = '正在探測 Root 權限 (su -c id)...';
+  if (el.rootStatusIndicator) el.rootStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-slate-400 animate-pulse';
+
+  try {
+    const res = await adbController.checkRootAccess();
+    if (res.hasRoot) {
+      if (el.rootStatusIndicator) el.rootStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+      if (el.rootStatusText) el.rootStatusText.textContent = 'Root 權限已就緒 (su 已授權)';
+      enableRootControls(true);
+    } else {
+      if (el.rootStatusIndicator) el.rootStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+      if (el.rootStatusText) el.rootStatusText.textContent = '未檢測到 Root 權限 (su 不可用或未授權)';
+      enableRootControls(false);
+    }
+  } catch (err) {
+    if (el.rootStatusIndicator) el.rootStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+    if (el.rootStatusText) el.rootStatusText.textContent = `Root 檢測失敗: ${err.message}`;
+    enableRootControls(false);
+  }
+}
+
+function enableRootControls(enabled) {
+  if (el.chkRootInlining) el.chkRootInlining.disabled = !enabled;
+  if (el.chkRootStripDebug) el.chkRootStripDebug.disabled = !enabled;
+  if (el.chkRootArmFeatures) el.chkRootArmFeatures.disabled = !enabled;
+  if (el.sliderRootThreads) el.sliderRootThreads.disabled = !enabled;
+  if (el.inputRootCpuSet) el.inputRootCpuSet.disabled = !enabled;
+  if (el.btnSaveRootConfig) el.btnSaveRootConfig.disabled = !enabled;
+}
+
+el.sliderRootThreads?.addEventListener('input', (e) => {
+  if (el.labelRootThreadsVal) el.labelRootThreadsVal.textContent = e.target.value;
+});
+
+el.btnProbeRoot?.addEventListener('click', probeRootStatus);
+
+el.btnSaveRootConfig?.addEventListener('click', () => {
+  const inlining = el.chkRootInlining?.checked || false;
+  const stripDebug = el.chkRootStripDebug?.checked || false;
+  const armFeatures = el.chkRootArmFeatures?.checked || false;
+  const threads = parseInt(el.sliderRootThreads?.value || '8', 10);
+  const cpuSet = el.inputRootCpuSet?.value.trim() || '';
+
+  const flags = [];
+  if (inlining) {
+    flags.push('--inline-max-code-units=128', '--inline-depth-limit=6');
+  }
+  if (stripDebug) {
+    flags.push('--no-generate-mini-debug-info');
+  }
+  if (armFeatures) {
+    flags.push('--instruction-set-features=default,dotprod,fp16,i8mm');
+  }
+
+  state.rootExpert = {
+    enabled: true,
+    inlining,
+    stripDebug,
+    armFeatures,
+    threads,
+    cpuSet,
+    extraFlags: flags.join(' '),
+  };
+
+  updateAdvancedBadge();
+  closeRootModal();
+  showToast('已啟用 Root 調校', `佇列執行時將自動注入自訂參數 (${threads} 緒${cpuSet ? `, cpu-set=${cpuSet}` : ''})，完成後自動還原。`, 'info');
+  appendTerminalLog(`\n[Root 專家] 已儲存調校設定: threads=${threads}, cpu-set=${cpuSet || 'all'}, flags="${state.rootExpert.extraFlags}"\n`);
+});
+
+el.btnRestoreRootNow?.addEventListener('click', async () => {
+  try {
+    await adbController.restoreDex2oatProps();
+    state.rootExpert.enabled = false;
+    updateAdvancedBadge();
+    showToast('已還原系統屬性', '已成功還原 Android 系統原始 dex2oat 屬性。', 'info');
+    appendTerminalLog('\n[Root 專家] 已手動還原系統原始 dex2oat 屬性。\n');
+  } catch (err) {
+    showToast('還原失敗', err.message, 'error');
+  }
+});
+
+el.btnOpenRootModal?.addEventListener('click', openRootModal);
+el.btnOpenRootQuick?.addEventListener('click', openRootModal);
+el.btnCloseRootModal?.addEventListener('click', closeRootModal);
+el.btnCloseRootModalHeader?.addEventListener('click', closeRootModal);
+
 /* ---------------- Initial Boot ---------------- */
 renderAppVersion();
 applyTheme(state.theme);
 setDexoptMode(state.dexoptMode);
+updateAdvancedCpuHint();
+updateAdvancedBadge();
 renderDisconnectedState();
 initOfflineSupport();
 

@@ -18,7 +18,88 @@ import {
   parseDumpsysPackageStream,
   parseSinglePackageDexopt,
   classifyApps,
+  parseSystemDexoptProps,
+  formatCpuConfigSummary,
 } from './parser.js';
+
+/**
+ * Build parameter-validated command array for AOT compilation
+ * Protects against command injection and supports SDK 34+ (cmd art) and SDK <34 (cmd package).
+ *
+ * @param {string} packageName Target package name
+ * @param {object} [options]
+ * @param {string} [options.filter='speed'] Compilation filter (speed, speed-profile, everything, verify, etc.)
+ * @param {string} [options.mode] Alias for filter
+ * @param {string} [options.reason] Optional reason flag (-r <reason>), e.g. cmdline, bg-dexopt
+ * @param {boolean|string} [options.checkProf] When false, appends --check-prof false
+ * @param {boolean} [options.clearProfile=false] When true, appends -c to clear profile before compile
+ * @param {string} [options.splitName] When specified, appends --split <splitName>
+ * @param {boolean} [options.isSecondary=false] When true, appends --secondary-dex
+ * @param {boolean} [options.force=true] When true, appends -f; when false, omits -f
+ * @param {number} [sdkVersion=34] Android API SDK version
+ * @returns {Array<string>} Command array suitable for adb execution
+ */
+export function buildCompileCommand(packageName, options = {}, sdkVersion = 33) {
+  if (!packageName || typeof packageName !== 'string' || !/^[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+$/.test(packageName.trim())) {
+    throw new Error(`無效的套件名稱 (Invalid package name): "${packageName}"`);
+  }
+  const pkg = packageName.trim();
+
+  const filter = (options.filter || options.mode || 'speed').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(filter)) {
+    throw new Error(`無效的編譯模式 (Invalid compilation filter): "${filter}"`);
+  }
+
+  const reason = options.compilerReason || options.reason;
+  if (reason && typeof reason === 'string') {
+    if (!/^[a-zA-Z0-9_-]+$/.test(reason.trim())) {
+      throw new Error(`無效的編譯原因 (Invalid compiler reason): "${reason}"`);
+    }
+  }
+
+  const splitName = options.splitName || options.split;
+  if (splitName && typeof splitName === 'string') {
+    if (!/^[a-zA-Z0-9_\.\-]+$/.test(splitName.trim())) {
+      throw new Error(`無效的 Split 模組名稱 (Invalid split name): "${splitName}"`);
+    }
+  }
+
+  const baseCmd = sdkVersion >= 34
+    ? ['cmd', 'art', 'compile']
+    : ['cmd', 'package', 'compile'];
+
+  const compileCmd = [...baseCmd];
+
+  if (options.clearProfile) {
+    compileCmd.push('-c');
+  }
+
+  compileCmd.push('-m', filter);
+
+  if (reason) {
+    compileCmd.push('-r', reason.trim());
+  }
+
+  const force = options.force !== false;
+  if (force) {
+    compileCmd.push('-f');
+  }
+
+  if (options.checkProfFalse || options.checkProf === false || options.checkProf === 'false') {
+    compileCmd.push('--check-prof', 'false');
+  }
+
+  if (splitName) {
+    compileCmd.push('--split', splitName.trim());
+  }
+
+  if (options.isSecondary) {
+    compileCmd.push('--secondary-dex');
+  }
+
+  compileCmd.push(pkg);
+  return compileCmd;
+}
 
 export class AdbController {
   constructor({ onLog, onStatusChange, onDeviceDisconnected } = {}) {
@@ -119,11 +200,14 @@ export class AdbController {
     const model = await this.getDeviceProp('ro.product.model', 'Android Device');
     const release = await this.getDeviceProp('ro.build.version.release', '14');
     const brand = await this.getDeviceProp('ro.product.brand', '');
+    const sdkStr = await this.getDeviceProp('ro.build.version.sdk', '34');
+    const sdk = parseInt(sdkStr, 10) || 34;
 
     this.deviceInfo = {
       model,
       release,
       brand,
+      sdk,
       serial: device.serial || 'USB-Device',
       title: `${model} (Android ${release})`,
     };
@@ -143,6 +227,7 @@ export class AdbController {
       model: 'Pixel 8',
       release: '14',
       brand: 'Google',
+      sdk: 34,
       serial: 'DEMO-PIXEL8-AOT',
       title: 'Pixel 8 (Android 14)',
     };
@@ -392,52 +477,129 @@ export class AdbController {
   }
 
   /**
-   * Optimize a single app with specified mode
-   * @param {string} packageName
-   * @param {'speed'|'speed-profile'} mode
-   * @param {object} options
-   * @param {boolean} [options.skipQueryStatus=false] - When true, skips dumpsys package re-query (for batch processing)
-   * @param {boolean} [options.force=true] - When true, adds -f flag to force compilation; when false, compiles without -f (fast mode)
-   * @param {boolean} [options.autoSecondaryDex=true] - When true, automatically compiles secondary DEX if optimizable items exist
-   * @param {object} [options.appInfo] - Optional app record containing secondaryDex information
+   * Build compile command targeting current device SDK
    */
-  async compileApp(packageName, mode = 'speed', { onOutput, skipQueryStatus = false, force = true, autoSecondaryDex = true, appInfo } = {}) {
-    this.log('最佳化', `正在編譯 [${packageName}]，模式: ${mode}${force ? ' (強制 -f)' : ' (快速/無 -f)'}...`);
-    
+  buildCompileCommand(packageName, options = {}) {
+    const sdk = typeof options.sdkVersion === 'number' ? options.sdkVersion : (this.deviceInfo?.sdk || 34);
+    return buildCompileCommand(packageName, options, sdk);
+  }
+
+  /**
+   * Optimize a single package with specified options (PLAN.md Section 1 & 5)
+   * Supports: filter, reason, checkProf, clearProfile, splitName, isSecondary, force, etc.
+   * Handles SDK >= 34 (cmd art) with automatic fallback to cmd package and pm.
+   *
+   * @param {string} packageName
+   * @param {object} [options]
+   * @param {string} [options.filter='speed']
+   * @param {string} [options.mode]
+   * @param {string} [options.reason]
+   * @param {boolean|string} [options.checkProf]
+   * @param {boolean} [options.clearProfile=false]
+   * @param {string} [options.splitName]
+   * @param {boolean} [options.isSecondary=false]
+   * @param {boolean} [options.force=true]
+   * @param {boolean} [options.skipQueryStatus=false]
+   * @param {boolean} [options.autoSecondaryDex=true]
+   * @param {object} [options.appInfo]
+   * @param {Function} [options.onOutput]
+   */
+  async compilePackage(packageName, options = {}) {
+    const filter = options.filter || options.mode || 'speed';
+    const force = options.force !== false;
+    const sdk = typeof options.sdkVersion === 'number' ? options.sdkVersion : (this.deviceInfo?.sdk || 33);
+
+    this.log('最佳化', `正在編譯 [${packageName}] (模式: ${filter}${options.reason ? `, 原因: ${options.reason}` : ''}${force ? ', 強制 -f' : ', 快速/無 -f'}${options.clearProfile ? ', 清空 Profile' : ''}${options.checkProf === false || options.checkProf === 'false' ? ', 略過 Profile 差異檢查' : ''}${options.splitName ? `, Split: ${options.splitName}` : ''})...`);
+
     if (this.isDemoMode) {
-      return this._mockCompileApp(packageName, mode, { onOutput, force, autoSecondaryDex, appInfo });
+      return this._mockCompilePackage(packageName, { ...options, filter, force });
     }
 
     // cmd package compile -m <mode> [-f] <package>
-    const compileCmd = ['cmd', 'package', 'compile', '-m', mode];
+    const compileCmd = buildCompileCommand(packageName, { ...options, filter, force }, sdk);
+    /*
     if (force) {
       compileCmd.push('-f');
     }
-    compileCmd.push(packageName);
+    */
 
-    const compileRes = await this.exec(compileCmd, { onOutput });
+    let res;
+    let shouldFallbackPackage = false;
+    let shouldFallbackPm = false;
 
-    // Issue #9 Problem 2: Auto-compile optimizable secondary DEX
-    // Note: Android ART does not maintain profile for secondary dex (dynamic jars),
-    // so compiling with 'speed-profile' will always fallback to 'verify'.
-    // Secondary dex MUST always be compiled with '-m speed'.
-    if (autoSecondaryDex && (appInfo?.hasOptimizableSecondaryDex || appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
-      this.log('最佳化', `正在最佳化 [${packageName}] 之次要 DEX (--secondary-dex，模式: speed)...`);
-      const secCmd = ['cmd', 'package', 'compile', '-m', 'speed'];
-      if (force) secCmd.push('-f');
-      secCmd.push('--secondary-dex', packageName);
+    try {
+      res = await this.exec(compileCmd, { onOutput: options.onOutput });
+      if (res && res.exitCode !== 0) {
+        const combined = `${res.stdout || ''} ${res.stderr || ''}`.toLowerCase();
+        if (combined.includes('not found') || combined.includes('inaccessible or not found') || res.exitCode === 127) {
+          if (compileCmd[1] === 'art') {
+            shouldFallbackPackage = true;
+          } else if (compileCmd[1] === 'package') {
+            shouldFallbackPm = true;
+          }
+        }
+      }
+    } catch (err) {
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('not found') || msg.includes('cmd')) {
+        if (compileCmd[1] === 'art') shouldFallbackPackage = true;
+        else shouldFallbackPm = true;
+      } else {
+        throw err;
+      }
+    }
+
+    if (shouldFallbackPackage) {
+      this.log('警告', 'cmd art compile 失敗或不存在，自動備援改用 cmd package compile...');
+      const fallbackCmd = buildCompileCommand(packageName, { ...options, filter, force }, 33);
       try {
-        await this.exec(secCmd, { onOutput });
+        res = await this.exec(fallbackCmd, { onOutput: options.onOutput });
+        if (res && res.exitCode !== 0) {
+          const combined = `${res.stdout || ''} ${res.stderr || ''}`.toLowerCase();
+          if (combined.includes('not found') || combined.includes('inaccessible or not found') || res.exitCode === 127) {
+            shouldFallbackPm = true;
+          }
+        }
+      } catch (err2) {
+        if ((err2.message || '').toLowerCase().includes('not found')) {
+          shouldFallbackPm = true;
+        } else {
+          throw err2;
+        }
+      }
+    }
+
+    if (shouldFallbackPm) {
+      this.log('警告', 'cmd package 失敗或不存在，自動備援改用舊版 pm compile...');
+      const pmCmd = ['pm', 'compile'];
+      if (options.clearProfile) pmCmd.push('-c');
+      pmCmd.push('-m', filter);
+      if (options.reason) pmCmd.push('-r', options.reason.trim());
+      if (force) pmCmd.push('-f');
+      if (options.checkProf === false || options.checkProf === 'false') pmCmd.push('--check-prof', 'false');
+      if (options.splitName) pmCmd.push('--split', options.splitName.trim());
+      if (options.isSecondary) pmCmd.push('--secondary-dex');
+      pmCmd.push(packageName);
+      res = await this.exec(pmCmd, { onOutput: options.onOutput });
+    }
+
+    // Auto-compile secondary DEX if optimizable items exist (Issue #9 Problem 2)
+    const autoSecondary = options.autoSecondaryDex !== false;
+    if (autoSecondary && !options.splitName && !options.isSecondary && (options.appInfo?.hasOptimizableSecondaryDex || options.appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
+      this.log('最佳化', `正在最佳化 [${packageName}] 之次要 DEX (--secondary-dex，模式: speed)...`);
+      const secCmd = buildCompileCommand(packageName, { filter: 'speed', force, isSecondary: true }, sdk);
+      try {
+        await this.exec(secCmd, { onOutput: options.onOutput });
       } catch (secErr) {
         this.log('警告', `[${packageName}] --secondary-dex 編譯略過或受限: ${secErr.message}`);
       }
     }
 
-    if (skipQueryStatus) {
+    if (options.skipQueryStatus) {
       this.log('完成', `[${packageName}] 編譯指令已送出 (批次模式略過單一 dumpsys 查詢)`);
       return {
-        status: mode,
-        reason: 'cmdline',
+        status: filter,
+        reason: options.reason || 'cmdline',
         hasCode: true,
       };
     }
@@ -446,16 +608,223 @@ export class AdbController {
     this.log('狀態更新', `重新擷取 [${packageName}] 之最新狀態...`);
     const dumpRes = await this.exec(['dumpsys', 'package', packageName]);
     const updated = parseSinglePackageDexopt(dumpRes.stdout, packageName);
-    
+
     // Safety fallback: if command execution succeeded, never degrade a valid app to N/A / no-code
     if (updated.status === 'unknown' || updated.status === 'N/A') {
-      updated.status = mode;
-      updated.reason = 'cmdline';
+      updated.status = filter;
+      updated.reason = options.reason || 'cmdline';
       updated.hasCode = true;
     }
 
     this.log('完成', `[${packageName}] 已更新為 status=${updated.status} reason=${updated.reason}`);
     return updated;
+  }
+
+  /**
+   * Optimize a single app with specified mode (Backward compatibility layer)
+   * @param {string} packageName
+   * @param {'speed'|'speed-profile'|'everything'|object} mode
+   * @param {object} [options]
+   * @param {boolean} [options.skipQueryStatus=false] - When true, skips dumpsys package re-query (for batch processing)
+   * @param {boolean} [options.force=true] - When true, adds -f flag to force compilation; when false, compiles without -f (fast mode)
+   * @param {boolean} [options.autoSecondaryDex=true] - When true, automatically compiles secondary DEX if optimizable items exist
+   * @param {object} [options.appInfo] - Optional app record containing secondaryDex information
+   * @param {Function} [options.onOutput]
+   */
+  async compileApp(packageName, mode = 'speed', { onOutput, skipQueryStatus = false, force = true, autoSecondaryDex = true, appInfo, ...extraOptions } = {}) {
+    if (typeof mode === 'object' && mode !== null) {
+      return this.compilePackage(packageName, { onOutput, skipQueryStatus, force, autoSecondaryDex, appInfo, ...mode });
+    }
+    return this.compilePackage(packageName, { filter: mode, onOutput, skipQueryStatus, force, autoSecondaryDex, appInfo, ...extraOptions });
+  }
+
+  /**
+   * Read dalvik.vm and pm.dexopt system properties
+   * @returns {Promise<object>} Parsed properties object
+   */
+  async getDexoptSystemProps() {
+    this.log('裝置資訊', '正在擷取系統 dex2oat 與 ART 調度屬性 (getprop)...');
+    let rawOutput = '';
+    if (this.isDemoMode) {
+      rawOutput = this._mockGetDexoptSystemProps();
+    } else {
+      if (!this.adb) throw new Error('裝置尚未連線。');
+      try {
+        const res = await this.exec(['getprop']);
+        rawOutput = res?.stdout || '';
+      } catch (err) {
+        this.log('警告', `getprop 讀取失敗: ${err.message}`);
+      }
+    }
+    const parsed = parseSystemDexoptProps(rawOutput);
+    this.systemDexoptProps = parsed;
+    this.log('裝置資訊', `已成功讀取 ART 屬性: ${parsed.summary}`);
+    return parsed;
+  }
+
+  /**
+   * Check if device has root access (su -c id => uid=0)
+   * @returns {Promise<{ hasRoot: boolean, uid: number|null, isDemo?: boolean, message: string }>}
+   */
+  async checkRootAccess() {
+    this.log('Root 檢查', '正在探測裝置是否具備 Root 權限 (su -c id)...');
+    if (this.isDemoMode) {
+      this.log('Root 檢查', '示範模式：已模擬取得 Root 專家級權限 (uid=0)。');
+      return { hasRoot: true, uid: 0, isDemo: true, message: '示範模式已模擬取得 Root 權限 (uid=0)' };
+    }
+
+    if (!this.adb) {
+      throw new Error('裝置尚未連線。');
+    }
+
+    try {
+      const res = await this.exec(['su', '-c', 'id']);
+      const out = `${res?.stdout || ''} ${res?.stderr || ''}`.trim();
+      const hasRoot = /uid=0\(root\)/i.test(out) || /uid=0\b/.test(out);
+      if (hasRoot) {
+        this.log('Root 檢查', '驗證成功：已取得 Root 權限 (uid=0)。');
+        return { hasRoot: true, uid: 0, message: '已取得 Root 專家級權限 (uid=0)' };
+      }
+      this.log('Root 檢查', `裝置未取得 Root 權限: ${out}`);
+      return { hasRoot: false, uid: null, message: '裝置未取得 Root 權限 (非 uid=0)' };
+    } catch (err) {
+      this.log('Root 檢查', `Root 探測失敗或無 su 二進位檔: ${err.message}`);
+      return { hasRoot: false, uid: null, message: err.message };
+    }
+  }
+
+  /**
+   * Back up current dalvik.vm dex2oat properties before applying Root adjustments
+   * @returns {Promise<object>}
+   */
+  async backupDex2oatProps() {
+    const backup = {
+      threads: await this.getDeviceProp('dalvik.vm.dex2oat-threads', ''),
+      cpuSet: await this.getDeviceProp('dalvik.vm.dex2oat-cpu-set', ''),
+      flags: await this.getDeviceProp('dalvik.vm.dex2oat-flags', ''),
+      timestamp: Date.now(),
+    };
+    this._rootPropsBackup = backup;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('dexopt_root_backup', JSON.stringify(backup));
+      } catch {
+        // ignore
+      }
+    }
+    return backup;
+  }
+
+  /**
+   * Apply custom dex2oat props via Root (su -c setprop)
+   * @param {object} config
+   * @param {number|string} [config.threads]
+   * @param {string} [config.cpuSet]
+   * @param {string} [config.extraFlags]
+   */
+  async applyCustomDex2oatProps(config = {}) {
+    if (!this._rootPropsBackup) {
+      await this.backupDex2oatProps();
+    }
+
+    this.log('Root 調校', '正在透過 su 動態套用 dex2oat 編譯器參數...');
+
+    if (config.threads !== undefined && config.threads !== null && config.threads !== '') {
+      const threadsNum = parseInt(config.threads, 10);
+      if (isNaN(threadsNum) || threadsNum < 1 || threadsNum > 32) {
+        throw new Error(`無效的執行緒數量 (Threads must be 1-32): ${config.threads}`);
+      }
+      if (this.isDemoMode) {
+        this.log('Root 調校', `[Demo] setprop dalvik.vm.dex2oat-threads ${threadsNum}`);
+      } else {
+        await this.exec(['su', '-c', `setprop dalvik.vm.dex2oat-threads ${threadsNum}`]);
+      }
+    }
+
+    if (config.cpuSet !== undefined && config.cpuSet !== null && config.cpuSet !== '') {
+      const cpuSetStr = String(config.cpuSet).trim();
+      if (!/^[0-9,\-]+$/.test(cpuSetStr)) {
+        throw new Error(`無效的 CPU 親和力遮罩 (Invalid cpu-set): "${cpuSetStr}"`);
+      }
+      if (this.isDemoMode) {
+        this.log('Root 調校', `[Demo] setprop dalvik.vm.dex2oat-cpu-set ${cpuSetStr}`);
+      } else {
+        await this.exec(['su', '-c', `setprop dalvik.vm.dex2oat-cpu-set ${cpuSetStr}`]);
+      }
+    }
+
+    if (config.extraFlags !== undefined && config.extraFlags !== null && config.extraFlags !== '') {
+      const flagsStr = String(config.extraFlags).trim();
+      if (/[;&|`<>$]/.test(flagsStr)) {
+        throw new Error(`額外旗標包含不安全字元 (Unsafe characters in extra flags): "${flagsStr}"`);
+      }
+      if (this.isDemoMode) {
+        this.log('Root 調校', `[Demo] setprop dalvik.vm.dex2oat-flags "${flagsStr}"`);
+      } else {
+        await this.exec(['su', '-c', `setprop dalvik.vm.dex2oat-flags "${flagsStr}"`]);
+      }
+    }
+
+    this.log('Root 調校', '已成功套用 Root 專家級 dex2oat 參數。');
+    return true;
+  }
+
+  /**
+   * Restore dex2oat properties to initial backup state
+   * @param {object} [backup]
+   */
+  async restoreDex2oatProps(backup = null) {
+    const toRestore = backup || this._rootPropsBackup || (() => {
+      if (typeof localStorage !== 'undefined') {
+        try {
+          const saved = localStorage.getItem('dexopt_root_backup');
+          return saved ? JSON.parse(saved) : null;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    })();
+
+    if (!toRestore) {
+      this.log('Root 還原', '無先前備份之屬性紀錄，略過還原。');
+      return false;
+    }
+
+    this.log('Root 還原', '正在還原原始 dalvik.vm 屬性設定...');
+    const commands = [];
+    if (toRestore.threads !== undefined) {
+      commands.push(['su', '-c', `setprop dalvik.vm.dex2oat-threads "${toRestore.threads || ''}"`]);
+    }
+    if (toRestore.cpuSet !== undefined) {
+      commands.push(['su', '-c', `setprop dalvik.vm.dex2oat-cpu-set "${toRestore.cpuSet || ''}"`]);
+    }
+    if (toRestore.flags !== undefined) {
+      commands.push(['su', '-c', `setprop dalvik.vm.dex2oat-flags "${toRestore.flags || ''}"`]);
+    }
+
+    if (this.isDemoMode) {
+      this.log('Root 還原', '[Demo] 已成功還原原始 dex2oat 屬性設定。');
+    } else {
+      for (const cmd of commands) {
+        try {
+          await this.exec(cmd);
+        } catch (e) {
+          this.log('警告', `還原屬性失敗: ${e.message}`);
+        }
+      }
+    }
+
+    this._rootPropsBackup = null;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem('dexopt_root_backup');
+      } catch {
+        // ignore
+      }
+    }
+    this.log('Root 還原', '系統屬性已安全還原完畢。');
+    return true;
   }
 
   /**
@@ -767,31 +1136,67 @@ export class AdbController {
     }
   }
 
-  async _mockCompileApp(packageName, mode, { onOutput, force = true, autoSecondaryDex = true, appInfo } = {}) {
+  async _mockCompileApp(packageName, mode, { onOutput, force = true, autoSecondaryDex = true, appInfo, ...options } = {}) {
+    return this._mockCompilePackage(packageName, { filter: mode, onOutput, force, autoSecondaryDex, appInfo, ...options });
+  }
+
+  async _mockCompilePackage(packageName, options = {}) {
+    const filter = options.filter || options.mode || 'speed';
+    const force = options.force !== false;
     await new Promise((r) => setTimeout(r, 600));
-    let output = `Compiling ${packageName} with mode=${mode}${force ? ' -f' : ''} ...\nSuccess\n`;
-    if (autoSecondaryDex && (appInfo?.hasOptimizableSecondaryDex || appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
+
+    let output = `Compiling ${packageName} with filter=${filter}${options.reason ? ` reason=${options.reason}` : ''}${force ? ' -f' : ''}${options.clearProfile ? ' -c' : ''}${options.checkProf === false || options.checkProf === 'false' ? ' --check-prof false' : ''}${options.splitName ? ` --split ${options.splitName}` : ''} ...\nSuccess\n`;
+
+    if (options.autoSecondaryDex && (options.appInfo?.hasOptimizableSecondaryDex || options.appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
       output += `Compiling secondary dex for ${packageName} with mode=speed${force ? ' -f' : ''} --secondary-dex ...\nSuccess\n`;
     }
-    onOutput?.(output, false);
+    options.onOutput?.(output, false);
+
+    const splits = (options.appInfo?.splits || []).map((s) => {
+      if (options.splitName && (s.name === options.splitName || s.fileName === options.splitName || s.splitName === options.splitName)) {
+        return { ...s, status: filter, reason: options.reason || 'cmdline' };
+      }
+      return s;
+    });
+
     return {
-      status: mode,
-      reason: 'cmdline',
+      status: options.splitName ? (options.appInfo?.status || filter) : filter,
+      reason: options.reason || 'cmdline',
       hasCode: true,
-      splits: appInfo?.splits || [],
-      secondaryDex: (appInfo?.secondaryDex || []).map((s) => ({
+      splits,
+      secondaryDex: (options.appInfo?.secondaryDex || []).map((s) => ({
         ...s,
         status: s.isUnsupportedContext || s.isRemoved ? s.status : 'speed',
         isOptimizable: false,
       })),
-      hasSecondaryDex: appInfo?.hasSecondaryDex || false,
+      hasSecondaryDex: options.appInfo?.hasSecondaryDex || false,
       hasOptimizableSecondaryDex: false,
-      secondaryDexSummary: appInfo?.secondaryDexSummary ? {
-        ...appInfo.secondaryDexSummary,
+      secondaryDexSummary: options.appInfo?.secondaryDexSummary ? {
+        ...options.appInfo.secondaryDexSummary,
         optimizableCount: 0,
-        compiledCount: appInfo.secondaryDexSummary.total - appInfo.secondaryDexSummary.restrictedCount,
+        compiledCount: options.appInfo.secondaryDexSummary.total - options.appInfo.secondaryDexSummary.restrictedCount,
       } : null,
     };
+  }
+
+  _mockGetDexoptSystemProps() {
+    return `
+[dalvik.vm.dex2oat-threads]: [8]
+[dalvik.vm.dex2oat-cpu-set]: [0,1,2,3,4,5,6,7]
+[dalvik.vm.bg-dexopt.threads]: [4]
+[dalvik.vm.bg-dexopt.cpu-set]: [0,1,2,3]
+[dalvik.vm.boot-dex2oat-threads]: [8]
+[dalvik.vm.boot-dex2oat-cpu-set]: [0,1,2,3,4,5,6,7]
+[dalvik.vm.image-dex2oat-threads]: [8]
+[dalvik.vm.dex2oat-flags]: [--no-generate-mini-debug-info]
+[dalvik.vm.dex2oat-filter]: [speed-profile]
+[pm.dexopt.bg-dexopt]: [speed-profile]
+[pm.dexopt.cmdline]: [speed]
+[pm.dexopt.first-boot]: [verify]
+[pm.dexopt.install]: [speed-profile]
+[pm.dexopt.boot-after-ota]: [verify]
+[pm.dexopt.inactive]: [verify]
+    `.trim();
   }
 
   async _mockCompileAll(mode, { onOutput } = {}) {

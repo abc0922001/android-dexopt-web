@@ -61,6 +61,18 @@
           </button>
         </div>
 
+        <!-- Device ART Scheduler Diagnostics Button -->
+        <button id="btnOpenDevicePropsModal" aria-label="查看裝置 ART 硬體調度環境" title="查看裝置 CPU 核心與 dex2oat 執行緒調度參數" class="px-3 py-2 min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-semibold">
+          <svg class="w-4 h-4 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+          <span class="hidden md:inline">ART 環境</span>
+        </button>
+
+        <!-- Root Expert Mode Button -->
+        <button id="btnOpenRootModal" aria-label="Root 專家級調校" title="啟用 Root 專家級 dex2oat 旗標注入與核心綁定" class="px-3 py-2 min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-semibold">
+          <svg class="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          <span class="hidden md:inline">Root 調校</span>
+        </button>
+
         <!-- Theme Toggle -->
         <button id="btnThemeToggle" aria-label="切換深淺色主題 (Toggle dark/light theme)" title="切換明暗主題" class="w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer flex items-center justify-center">
           <span id="themeIcon"></span>
@@ -144,11 +156,84 @@
               <button id="modeSpeedProfile" class="px-3.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer" role="tab">
                 speed-profile
               </button>
+              <button id="modeEverything" class="px-3.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer" role="tab" title="everything 強制全量編譯所有類別與方法（含靜態初始化與超大方法），耗時最長且空間最大，追求零 JIT。">
+                everything
+              </button>
             </div>
           </div>
           <p id="modeHintText" class="text-xs text-slate-500 dark:text-slate-400 max-w-md">
             Hint: speed 強制完整 AOT 編譯所有位元碼，不依賴使用紀錄，啟動最快。
           </p>
+        </div>
+      </div>
+
+      <!-- Advanced Compiler Options Accordion (PLAN.md Section 1 & 2) -->
+      <div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/60">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <button id="btnToggleAdvancedOptions" type="button" aria-expanded="false" aria-controls="advancedOptionsPanel" class="text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-400 flex items-center gap-1.5 cursor-pointer py-1">
+            <svg id="advancedOptionsChevron" class="w-4 h-4 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            <span>進階編譯與溫控設定 (Advanced Options)</span>
+            <span id="advancedOptionsBadge" class="hidden px-1.5 py-0.2 rounded-full text-[10px] bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-mono font-bold">已客製</span>
+          </button>
+          <div class="flex items-center gap-2 text-xs">
+            <button id="btnOpenDevicePropsQuick" class="text-[11px] font-medium text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+              <span>硬體調度參數</span>
+            </button>
+            <span class="text-slate-300 dark:text-slate-700">•</span>
+            <button id="btnOpenRootQuick" class="text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              <span>Root 專家調校</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="advancedOptionsPanel" class="hidden mt-3 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-3 text-xs">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Compiler Reason / CPU Scheduler Mode -->
+            <div>
+              <label class="block font-semibold text-slate-800 dark:text-slate-200 mb-1.5">
+                編譯資源與溫控調度 (-r reason)：
+              </label>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button type="button" data-reason="default" class="btn-reason-select active px-2.5 py-1.5 rounded-lg border border-cyan-500 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200 text-center font-medium transition-all cursor-pointer">
+                  <span class="block font-semibold text-[11px]">系統預設</span>
+                  <span class="text-[10px] text-slate-400">標準模式</span>
+                </button>
+                <button type="button" data-reason="cmdline" class="btn-reason-select px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-center font-medium transition-all cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <span class="block font-semibold text-[11px] text-cyan-600 dark:text-cyan-400">極速全核</span>
+                  <span class="text-[10px] text-slate-400">-r cmdline</span>
+                </button>
+                <button type="button" data-reason="bg-dexopt" class="btn-reason-select px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-center font-medium transition-all cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800">
+                  <span class="block font-semibold text-[11px] text-emerald-600 dark:text-emerald-400">溫和降溫</span>
+                  <span class="text-[10px] text-slate-400">-r bg-dexopt</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Profile Fine-grained Controls -->
+            <div>
+              <label class="block font-semibold text-slate-800 dark:text-slate-200 mb-1.5">
+                Profile 門檻與快照管理：
+              </label>
+              <div class="space-y-1.5">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="chkCheckProfFalse" class="rounded text-cyan-500 focus:ring-cyan-500">
+                  <span class="text-slate-700 dark:text-slate-300">略過 Profile 差異檢查 (<code class="font-mono text-[11px]">--check-prof false</code>)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="chkClearProfile" class="rounded text-amber-500 focus:ring-amber-500">
+                  <span class="text-slate-700 dark:text-slate-300">編譯前清空舊 Profile (<code class="font-mono text-[11px]">-c</code>)</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic CPU hardware description -->
+          <div id="advancedCpuHintBox" class="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-[11px] text-cyan-900 dark:text-cyan-300 flex items-center justify-between">
+            <span id="advancedCpuHintText">正在讀取裝置 CPU 調度配置...</span>
+            <span class="font-mono text-[10px] opacity-75">免 Root 即時生效</span>
+          </div>
         </div>
       </div>
     </section>
@@ -874,6 +959,7 @@
                 <th class="py-2 px-3">狀態</th>
                 <th class="py-2 px-3">應用程式</th>
                 <th class="py-2 px-3">模式</th>
+                <th class="py-2 px-3">狀態躍遷</th>
                 <th class="py-2 px-3">耗時</th>
                 <th class="py-2 px-3 text-right">操作</th>
               </tr>
@@ -893,6 +979,226 @@
         <button id="btnCloseQueueModal" class="px-5 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
           關閉
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Device ART / dex2oat Diagnostics Modal (PLAN.md Section 2.1) -->
+  <div id="devicePropsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="devicePropsModalTitle">
+    <div class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-500 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+          </div>
+          <div>
+            <h3 id="devicePropsModalTitle" class="text-base font-bold text-slate-900 dark:text-white">
+              裝置 ART / dex2oat 硬體調度診斷
+            </h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              讀取系統底層 dalvik.vm 與 pm.dexopt 參數，掌握當前 CPU 綁核與執行緒配置
+            </p>
+          </div>
+        </div>
+        <button id="btnCloseDevicePropsModalHeader" aria-label="關閉視窗" class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center justify-center cursor-pointer">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs max-h-96 overflow-y-auto">
+        <div class="grid grid-cols-2 gap-2.5">
+          <div class="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
+            <span class="text-[10px] text-cyan-700 dark:text-cyan-300 font-semibold block">極速全核模式 (cmdline / 預設)</span>
+            <div class="mt-1 font-mono font-bold text-sm text-slate-900 dark:text-slate-100" id="dpDefaultThreads">8 執行緒</div>
+            <div class="text-[11px] text-slate-500 mt-0.5" id="dpDefaultCpuSet">CPU 核心: 0-7 (全核心)</div>
+          </div>
+          <div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+            <span class="text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold block">溫和降溫模式 (bg-dexopt)</span>
+            <div class="mt-1 font-mono font-bold text-sm text-slate-900 dark:text-slate-100" id="dpBgThreads">4 執行緒</div>
+            <div class="text-[11px] text-slate-500 mt-0.5" id="dpBgCpuSet">CPU 核心: 0-3 (小核降溫)</div>
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-2">
+          <span class="font-semibold text-slate-800 dark:text-slate-200 block">啟動與編譯器內部旗標：</span>
+          <div class="grid grid-cols-2 gap-2 text-[11px]">
+            <div><span class="text-slate-400">Boot Threads:</span> <span id="dpBootThreads" class="font-mono font-medium">8</span></div>
+            <div><span class="text-slate-400">Image Threads:</span> <span id="dpImageThreads" class="font-mono font-medium">8</span></div>
+            <div class="col-span-2"><span class="text-slate-400">dex2oat-filter:</span> <span id="dpDex2oatFilter" class="font-mono font-semibold text-cyan-600 dark:text-cyan-400">speed-profile</span></div>
+            <div class="col-span-2"><span class="text-slate-400">dex2oat-flags:</span> <span id="dpExtraFlags" class="font-mono break-all text-slate-600 dark:text-slate-300">(無額外注入旗標)</span></div>
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-1.5">
+          <span class="font-semibold text-slate-800 dark:text-slate-200 block">系統各場景預設過濾器 (pm.dexopt.*)：</span>
+          <div id="dpPmFiltersList" class="grid grid-cols-2 gap-1 text-[11px] font-mono">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button id="btnRefreshDeviceProps" class="text-xs text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          <span>重新探測</span>
+        </button>
+        <button id="btnCloseDevicePropsModal" class="px-5 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
+          關閉
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Split APK & Re-profile Modal (PLAN.md Section 1.4 & 1.5) -->
+  <div id="splitModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="splitModalTitle">
+    <div class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-500 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+          </div>
+          <div>
+            <h3 id="splitModalTitle" class="text-base font-bold text-slate-900 dark:text-white">
+              Split APK 模組與 Profile 工作流
+            </h3>
+            <p id="splitModalPkg" class="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5 break-all">
+              com.example.app
+            </p>
+          </div>
+        </div>
+        <button id="btnCloseSplitModalHeader" aria-label="關閉視窗" class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center justify-center cursor-pointer">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Quick Action: Clear & Re-profile -->
+      <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-3 text-xs">
+        <div>
+          <span class="font-bold text-amber-900 dark:text-amber-200 block">Profile 洗白與重建工作流：</span>
+          <p class="text-[11px] text-amber-800/80 dark:text-amber-300/80 mt-0.5">
+            執行 <code class="font-mono text-amber-700 dark:text-amber-300">-c -m verify</code> 清空過時熱點，隨後正常操作數分鐘即可重新收集純淨 Profile。
+          </p>
+        </div>
+        <button id="btnClearAndReprofile" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 shrink-0 cursor-pointer shadow-sm active:scale-95">
+          清空 Profile (-c)
+        </button>
+      </div>
+
+      <!-- Splits List with Individual Compilation -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-xs">
+          <span class="font-semibold text-slate-700 dark:text-slate-300">選擇獨立編譯的 Split 模組 (--split)：</span>
+          <span id="splitCountBadge" class="font-mono text-slate-500">0 個模組</span>
+        </div>
+        <div id="splitListContainer" class="max-h-48 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 p-2 text-xs space-y-1.5 bg-slate-50 dark:bg-slate-900/40">
+          <!-- Dynamically populated list of splits with radio or checkboxes -->
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button id="btnCloseSplitModal" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
+          關閉
+        </button>
+        <button id="btnCompileSelectedSplit" class="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-950 bg-gradient-to-r from-purple-400 to-indigo-400 hover:from-purple-300 hover:to-indigo-300 shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95">
+          <span>編譯選取的 Split 模組</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Root Expert Mode Tuning Modal (PLAN.md Section 3) -->
+  <div id="rootExpertModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="rootModalTitle">
+    <div class="bg-white dark:bg-[#131d2e] border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          </div>
+          <div>
+            <h3 id="rootModalTitle" class="text-base font-bold text-slate-900 dark:text-white">
+              Root 專家級 dex2oat 調校面板
+            </h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              透過 su -c setprop 注入編譯器參數，佇列完成或中斷自動還原
+            </p>
+          </div>
+        </div>
+        <button id="btnCloseRootModalHeader" aria-label="關閉視窗" class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center justify-center cursor-pointer">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Root Status Probe Badge -->
+      <div id="rootStatusBox" class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+        <div class="flex items-center gap-2">
+          <span id="rootStatusIndicator" class="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+          <span id="rootStatusText" class="font-semibold text-slate-800 dark:text-slate-200">正在探測 Root 權限...</span>
+        </div>
+        <button id="btnProbeRoot" class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer">
+          重新驗證 su
+        </button>
+      </div>
+
+      <!-- Parameter controls -->
+      <div class="space-y-3 text-xs">
+        <div class="space-y-2">
+          <span class="font-semibold text-slate-800 dark:text-slate-200 block">編譯器優化旗標 (dalvik.vm.dex2oat-flags)：</span>
+          <label class="flex items-start gap-2.5 p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer">
+            <input type="checkbox" id="chkRootInlining" class="mt-0.5 text-cyan-500 focus:ring-cyan-500">
+            <div>
+              <span class="font-bold text-slate-900 dark:text-slate-100">積極內聯最佳化 (Aggressive Inlining)</span>
+              <p class="text-[11px] text-slate-500">放寬內聯門檻 (--inline-max-code-units=128 --inline-depth-limit=6)，提升滑動幀率。</p>
+            </div>
+          </label>
+          <label class="flex items-start gap-2.5 p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer">
+            <input type="checkbox" id="chkRootStripDebug" class="mt-0.5 text-cyan-500 focus:ring-cyan-500">
+            <div>
+              <span class="font-bold text-slate-900 dark:text-slate-100">精簡產物體積 (Strip Mini-Debug-Info)</span>
+              <p class="text-[11px] text-slate-500">剔除 .odex 除錯符號 (--no-generate-mini-debug-info)，機器碼體積縮減 10~20%。</p>
+            </div>
+          </label>
+          <label class="flex items-start gap-2.5 p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer">
+            <input type="checkbox" id="chkRootArmFeatures" class="mt-0.5 text-cyan-500 focus:ring-cyan-500">
+            <div>
+              <span class="font-bold text-slate-900 dark:text-slate-100">ARM 微架構硬體指令加速</span>
+              <p class="text-[11px] text-slate-500">強制啟用點積與浮點加速 (--instruction-set-features=default,dotprod,fp16,i8mm)。</p>
+            </div>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 pt-1">
+          <div>
+            <label class="block font-semibold text-slate-800 dark:text-slate-200 mb-1">
+              平行編譯執行緒數：<span id="labelRootThreadsVal" class="font-mono text-cyan-600 dark:text-cyan-400 font-bold">8</span>
+            </label>
+            <input type="range" id="sliderRootThreads" min="1" max="16" value="8" class="w-full accent-cyan-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-800 dark:text-slate-200 mb-1">
+              CPU 核心親和力 (cpu-set)：
+            </label>
+            <input type="text" id="inputRootCpuSet" placeholder="例: 0-7 或 4,5,6,7" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500">
+          </div>
+        </div>
+
+        <!-- Safe sandbox note -->
+        <div class="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-900 dark:text-emerald-300">
+          🛡️ <strong>安全沙盒保證：</strong>所選參數僅在 AOT 批次/佇列執行期間臨時注入；任務完成、手動中止或斷線時將<strong>自動還原</strong>原始系統設定。
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button id="btnRestoreRootNow" class="text-xs text-rose-600 dark:text-rose-400 hover:underline cursor-pointer">
+          立即手動還原預設值
+        </button>
+        <div class="flex items-center gap-2">
+          <button id="btnCloseRootModal" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer">
+            關閉
+          </button>
+          <button id="btnSaveRootConfig" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-all cursor-pointer shadow-sm active:scale-95">
+            啟用並儲存調校
+          </button>
+        </div>
       </div>
     </div>
   </div>

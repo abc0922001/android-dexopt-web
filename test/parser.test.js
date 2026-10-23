@@ -13,6 +13,8 @@ import {
   getStatusPriority,
   sortApps,
   calculateUsagePriorityScore,
+  parseSystemDexoptProps,
+  formatCpuConfigSummary,
 } from '../src/parser.js';
 
 test('parsePackageList correctly parses third party and system packages', () => {
@@ -832,5 +834,55 @@ test('sortApps with default sorts by rankingScore / priorityScore descending', (
   assert.strictEqual(sorted[2].packageName, 'app.system');
   assert.strictEqual(sorted[3].packageName, 'app.low');
 });
+
+test('parseSystemDexoptProps parses dalvik.vm and pm.dexopt properties accurately', () => {
+  const sampleGetprop = `
+[dalvik.vm.dex2oat-threads]: [8]
+[dalvik.vm.dex2oat-cpu-set]: [0,1,2,3,4,5,6,7]
+[dalvik.vm.boot-dex2oat-threads]: [8]
+[dalvik.vm.image-dex2oat-threads]: [4]
+[dalvik.vm.background-dex2oat-threads]: [4]
+[dalvik.vm.background-dex2oat-cpu-set]: [0,1,2,3]
+[dalvik.vm.dex2oat-filter]: [speed-profile]
+[dalvik.vm.dex2oat-flags]: [--inline-max-code-units=128]
+[pm.dexopt.install]: [speed-profile]
+[pm.dexopt.bg-dexopt]: [speed-profile]
+[pm.dexopt.cmdline]: [speed]
+[ro.product.model]: [Pixel 8 Pro]
+`;
+
+  const props = parseSystemDexoptProps(sampleGetprop);
+  assert.strictEqual(props.threads, '8');
+  assert.strictEqual(props.cpuSet, '0,1,2,3,4,5,6,7');
+  assert.strictEqual(props.bgDexoptThreads, '4');
+  assert.strictEqual(props.bgDexoptCpuSet, '0,1,2,3');
+  assert.strictEqual(props.bootImageThreads, '8');
+  assert.strictEqual(props.imageThreads, '4');
+  assert.strictEqual(props.dex2oatFilter, 'speed-profile');
+  assert.strictEqual(props.extraFlags, '--inline-max-code-units=128');
+  assert.strictEqual(props.pmDexopt.install, 'speed-profile');
+  assert.strictEqual(props.pmDexopt['bg-dexopt'], 'speed-profile');
+  assert.strictEqual(props.pmDexopt.cmdline, 'speed');
+});
+
+test('formatCpuConfigSummary formats Traditional Chinese description for various modes', () => {
+  const props = {
+    threads: '8',
+    cpuSet: '0-7',
+    bgDexoptThreads: '4',
+    bgDexoptCpuSet: '0-3',
+  };
+
+  const sDefault = formatCpuConfigSummary(props, 'default');
+  assert.ok(sDefault.includes('8 執行緒') || sDefault.includes('8'));
+  assert.ok(sDefault.includes('0-7'));
+
+  const sCmdline = formatCpuConfigSummary(props, 'cmdline');
+  assert.ok(sCmdline.includes('全核心') || sCmdline.includes('極速'));
+
+  const sBg = formatCpuConfigSummary(props, 'bg-dexopt');
+  assert.ok(sBg.includes('4 執行緒') || sBg.includes('小核心') || sBg.includes('降溫'));
+});
+
 
 
