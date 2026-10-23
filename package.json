@@ -1,8 +1,12 @@
 {
   "name": "android-dexopt-web",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "WebADB Android ART Dexopt performance optimization management tool",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -31,8 +35,8 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "autoprefixer": "^10.6.1",
-    "postcss": "^8.5.28",
+    "postcss": "^8.5.31",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.3.2"
+    "vite": "^8.3.5"
   }
 }
