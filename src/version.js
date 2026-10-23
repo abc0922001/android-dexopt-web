@@ -2,7 +2,7 @@
  * Global Semantic Version of Android Dexopt Studio Web (SemVer: Major.Minor.Patch)
  * Synchronized with package.json version
  */
-export const APP_VERSION = '1.7.0';
+export const APP_VERSION = '1.7.1';
 
 /**
  * Returns the version string with 'v' prefix

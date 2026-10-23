@@ -64,7 +64,7 @@ export function buildCompileCommand(packageName, options = {}, sdkVersion = 33) 
     }
   }
 
-  const baseCmd = sdkVersion >= 34
+  const baseCmd = (sdkVersion >= 34 && options.usePackageService !== true)
     ? ['cmd', 'art', 'compile']
     : ['cmd', 'package', 'compile'];
 
@@ -211,6 +211,22 @@ export class AdbController {
       serial: device.serial || 'USB-Device',
       title: `${model} (Android ${release})`,
     };
+
+    // Probe if ART service exists on Android 14+
+    this._supportsArtService = undefined;
+    if (sdk >= 34) {
+      try {
+        const checkArt = await this.exec(['cmd', 'art', '--version']);
+        const combined = `${checkArt?.stdout || ''} ${checkArt?.stderr || ''}`.toLowerCase();
+        if (checkArt?.exitCode !== 0 || combined.includes("can't find service") || combined.includes('cannot find service')) {
+          this._supportsArtService = false;
+        } else {
+          this._supportsArtService = true;
+        }
+      } catch {
+        this._supportsArtService = false;
+      }
+    }
 
     this.log('ADB', `已成功連線至 ${this.deviceInfo.title}`);
     this.onStatusChange({ state: 'connected', device: this.deviceInfo });
@@ -507,16 +523,21 @@ export class AdbController {
   async compilePackage(packageName, options = {}) {
     const filter = options.filter || options.mode || 'speed';
     const force = options.force !== false;
-    const sdk = typeof options.sdkVersion === 'number' ? options.sdkVersion : (this.deviceInfo?.sdk || 33);
+    const sdk = typeof options.sdkVersion === 'number'
+      ? options.sdkVersion
+      : (this._supportsArtService === false ? 33 : (this.deviceInfo?.sdk || 33));
 
-    this.log('最佳化', `正在編譯 [${packageName}] (模式: ${filter}${options.reason ? `, 原因: ${options.reason}` : ''}${force ? ', 強制 -f' : ', 快速/無 -f'}${options.clearProfile ? ', 清空 Profile' : ''}${options.checkProf === false || options.checkProf === 'false' ? ', 略過 Profile 差異檢查' : ''}${options.splitName ? `, Split: ${options.splitName}` : ''})...`);
+    const compileReason = options.compilerReason || options.reason;
+    const splitTarget = options.splitName || options.split;
+
+    this.log('最佳化', `正在編譯 [${packageName}] (模式: ${filter}${compileReason ? `, 原因: ${compileReason}` : ''}${force ? ', 強制 -f' : ', 快速/無 -f'}${options.clearProfile ? ', 清空 Profile' : ''}${options.checkProfFalse || options.checkProf === false || options.checkProf === 'false' ? ', 略過 Profile 差異檢查' : ''}${splitTarget ? `, Split: ${splitTarget}` : ''})...`);
 
     if (this.isDemoMode) {
-      return this._mockCompilePackage(packageName, { ...options, filter, force });
+      return this._mockCompilePackage(packageName, { ...options, filter, force, reason: compileReason, splitName: splitTarget });
     }
 
     // cmd package compile -m <mode> [-f] <package>
-    const compileCmd = buildCompileCommand(packageName, { ...options, filter, force }, sdk);
+    const compileCmd = buildCompileCommand(packageName, { ...options, filter, force, usePackageService: this._supportsArtService === false }, sdk);
     /*
     if (force) {
       compileCmd.push('-f');
@@ -531,37 +552,44 @@ export class AdbController {
       res = await this.exec(compileCmd, { onOutput: options.onOutput });
       if (res && res.exitCode !== 0) {
         const combined = `${res.stdout || ''} ${res.stderr || ''}`.toLowerCase();
-        if (combined.includes('not found') || combined.includes('inaccessible or not found') || res.exitCode === 127) {
-          if (compileCmd[1] === 'art') {
-            shouldFallbackPackage = true;
-          } else if (compileCmd[1] === 'package') {
+        if (compileCmd[1] === 'art') {
+          // If cmd art failed for ANY reason (e.g. Can't find service: art, exitCode != 0), fallback to cmd package
+          shouldFallbackPackage = true;
+          this._supportsArtService = false;
+        } else if (compileCmd[1] === 'package') {
+          if (combined.includes('not found') || combined.includes('inaccessible') || combined.includes("can't find service") || res.exitCode === 127) {
             shouldFallbackPm = true;
           }
         }
+      } else if (compileCmd[1] === 'art') {
+        this._supportsArtService = true;
       }
     } catch (err) {
       const msg = (err.message || '').toLowerCase();
-      if (msg.includes('not found') || msg.includes('cmd')) {
-        if (compileCmd[1] === 'art') shouldFallbackPackage = true;
-        else shouldFallbackPm = true;
+      if (compileCmd[1] === 'art') {
+        shouldFallbackPackage = true;
+        this._supportsArtService = false;
+      } else if (msg.includes('not found') || msg.includes('cmd') || msg.includes("can't find service")) {
+        shouldFallbackPm = true;
       } else {
         throw err;
       }
     }
 
     if (shouldFallbackPackage) {
-      this.log('警告', 'cmd art compile 失敗或不存在，自動備援改用 cmd package compile...');
-      const fallbackCmd = buildCompileCommand(packageName, { ...options, filter, force }, 33);
+      this.log('警告', 'cmd art compile 在此裝置無法使用 (Can\'t find service: art)，自動備援改用標準 cmd package compile...');
+      const fallbackCmd = buildCompileCommand(packageName, { ...options, filter, force, usePackageService: true }, 33);
       try {
         res = await this.exec(fallbackCmd, { onOutput: options.onOutput });
         if (res && res.exitCode !== 0) {
           const combined = `${res.stdout || ''} ${res.stderr || ''}`.toLowerCase();
-          if (combined.includes('not found') || combined.includes('inaccessible or not found') || res.exitCode === 127) {
+          if (combined.includes('not found') || combined.includes('inaccessible') || combined.includes("can't find service") || res.exitCode === 127) {
             shouldFallbackPm = true;
           }
         }
       } catch (err2) {
-        if ((err2.message || '').toLowerCase().includes('not found')) {
+        const msg2 = (err2.message || '').toLowerCase();
+        if (msg2.includes('not found') || msg2.includes('cmd') || msg2.includes("can't find service")) {
           shouldFallbackPm = true;
         } else {
           throw err2;
@@ -574,20 +602,26 @@ export class AdbController {
       const pmCmd = ['pm', 'compile'];
       if (options.clearProfile) pmCmd.push('-c');
       pmCmd.push('-m', filter);
-      if (options.reason) pmCmd.push('-r', options.reason.trim());
+      if (compileReason) pmCmd.push('-r', compileReason.trim());
       if (force) pmCmd.push('-f');
-      if (options.checkProf === false || options.checkProf === 'false') pmCmd.push('--check-prof', 'false');
-      if (options.splitName) pmCmd.push('--split', options.splitName.trim());
+      if (options.checkProfFalse || options.checkProf === false || options.checkProf === 'false') pmCmd.push('--check-prof', 'false');
+      if (splitTarget) pmCmd.push('--split', splitTarget.trim());
       if (options.isSecondary) pmCmd.push('--secondary-dex');
       pmCmd.push(packageName);
       res = await this.exec(pmCmd, { onOutput: options.onOutput });
     }
 
+    if (res && res.exitCode !== 0 && !options.skipThrowOnError) {
+      const errMsg = (res.stderr || res.stdout || `Exit code ${res.exitCode}`).trim();
+      throw new Error(`編譯指令執行失敗: ${errMsg}`);
+    }
+
     // Auto-compile secondary DEX if optimizable items exist (Issue #9 Problem 2)
     const autoSecondary = options.autoSecondaryDex !== false;
-    if (autoSecondary && !options.splitName && !options.isSecondary && (options.appInfo?.hasOptimizableSecondaryDex || options.appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
+    if (autoSecondary && !splitTarget && !options.isSecondary && (options.appInfo?.hasOptimizableSecondaryDex || options.appInfo?.secondaryDexSummary?.optimizableCount > 0)) {
       this.log('最佳化', `正在最佳化 [${packageName}] 之次要 DEX (--secondary-dex，模式: speed)...`);
-      const secCmd = buildCompileCommand(packageName, { filter: 'speed', force, isSecondary: true }, sdk);
+      const secSdk = (this._supportsArtService === false) ? 33 : sdk;
+      const secCmd = buildCompileCommand(packageName, { filter: 'speed', force, isSecondary: true, usePackageService: this._supportsArtService === false }, secSdk);
       try {
         await this.exec(secCmd, { onOutput: options.onOutput });
       } catch (secErr) {

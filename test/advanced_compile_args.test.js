@@ -110,3 +110,46 @@ test('AdbController validates custom dex2oat props strictly', async () => {
     await controller.applyCustomDex2oatProps({ extraFlags: '--inline-max-code-units=128; rm -rf /' });
   }, /額外旗標包含不安全字元/);
 });
+
+test('compilePackage automatically falls back from cmd art to cmd package when art service not found', async () => {
+  const controller = new AdbController();
+  controller.deviceInfo = { model: 'Real Device', release: '14', sdk: 34, title: 'Real Device (Android 14)' };
+
+  const executedCmds = [];
+  controller.exec = async (cmd) => {
+    executedCmds.push(cmd);
+    if (cmd[0] === 'cmd' && cmd[1] === 'art') {
+      return { stdout: '', stderr: "cmd: Can't find service: art\n", exitCode: 20 };
+    }
+    if (cmd[0] === 'dumpsys') {
+      return { stdout: 'arm64: [status=everything] [reason=cmdline]', stderr: '', exitCode: 0 };
+    }
+    return { stdout: 'Success\n', stderr: '', exitCode: 0 };
+  };
+
+  const res = await controller.compilePackage('com.com2us.mlbgm.normal.freefull.google.global.android.common', {
+    filter: 'everything',
+    force: true,
+  });
+
+  // Verify cmd art was attempted first and failed
+  assert.strictEqual(executedCmds[0][1], 'art');
+
+  // Verify fallback executed cmd package compile
+  assert.strictEqual(executedCmds[1][1], 'package');
+  assert.deepStrictEqual(executedCmds[1], [
+    'cmd', 'package', 'compile', '-m', 'everything', '-f',
+    'com.com2us.mlbgm.normal.freefull.google.global.android.common',
+  ]);
+
+  // Verify result status is everything
+  assert.strictEqual(res.status, 'everything');
+
+  // Verify controller remembered that art service is not supported
+  assert.strictEqual(controller._supportsArtService, false);
+
+  // Subsequent call should immediately use cmd package compile without trying cmd art
+  executedCmds.length = 0;
+  await controller.compilePackage('com.another.app', { filter: 'speed' });
+  assert.strictEqual(executedCmds[0][1], 'package');
+});
