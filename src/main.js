@@ -457,6 +457,8 @@ async function handleDemoMode() {
   }
 }
 
+el.btnConnect?.addEventListener('click', handleConnect);
+el.btnDemoMode?.addEventListener('click', handleDemoMode);
 el.btnConnectHero?.addEventListener('click', handleConnect);
 el.btnDemoHero?.addEventListener('click', handleDemoMode);
 
@@ -635,8 +637,7 @@ function renderAppGrids() {
     });
   });
 
-  const totalVisible = (showFrequent ? filteredFrequent.length : 0) +
-                       (showGeneral ? filteredGeneral.length : 0) +
+  const totalVisible = (showApps ? filteredApps.length : 0) +
                        (showCannotAot ? filteredCannotAot.length : 0);
 
   if (totalVisible === 0) {

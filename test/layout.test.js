@@ -52,6 +52,32 @@ test('main.js createAppCardHtml returns proper responsive card classes', () => {
   assert.ok(js.includes('class="app-card-badges '), 'createAppCardHtml should output app-card-badges');
 });
 
+test('main.js renderAppGrids does not reference undefined legacy variables and binds top-right btnConnect on cold boot', () => {
+  const js = fs.readFileSync(path.join(rootDir, 'src/main.js'), 'utf-8');
+
+  // Ensure legacy split-grid variables that caused ReferenceError in setDexoptMode -> renderAppGrids on cold start are absent
+  assert.ok(!js.includes('showFrequent'), 'renderAppGrids must not reference undefined showFrequent');
+  assert.ok(!js.includes('filteredFrequent'), 'renderAppGrids must not reference undefined filteredFrequent');
+  assert.ok(!js.includes('showGeneral'), 'renderAppGrids must not reference undefined showGeneral');
+  assert.ok(!js.includes('filteredGeneral'), 'renderAppGrids must not reference undefined filteredGeneral');
+
+  // Ensure totalVisible uses unified showApps and filteredApps
+  assert.ok(
+    js.includes('(showApps ? filteredApps.length : 0)'),
+    'renderAppGrids must compute totalVisible from showApps and filteredApps'
+  );
+
+  // Ensure both top-right btnConnect and hero btnConnectHero bind handleConnect
+  assert.ok(
+    js.includes("el.btnConnect?.addEventListener('click', handleConnect)"),
+    'el.btnConnect must bind handleConnect directly'
+  );
+  assert.ok(
+    js.includes("el.btnConnectHero?.addEventListener('click', handleConnect)"),
+    'el.btnConnectHero must bind handleConnect'
+  );
+});
+
 test('container query dynamically switches header layout in browser engine', (t) => {
   const css = fs.readFileSync(path.join(rootDir, 'src/style.css'), 'utf-8');
 
